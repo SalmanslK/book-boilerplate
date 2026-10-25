@@ -1,0 +1,13 @@
+
+# The AI factory's local evidence and guard log
+.factory/
+__pycache__/
+
+# Build output and dependencies
+bin/
+obj/
+TestResults/
+.vs/
+node_modules/
+dist/
+*.user

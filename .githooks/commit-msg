@@ -1,0 +1,23 @@
+#!/bin/sh
+#
+# Holds the commit message to CLAUDE.md's rules: no AI or tooling attribution, no trailer lines,
+# and on a fix branch the defect or question id, or the tracker key, it fixes. Same activation as
+# pre-commit:
+#
+#     git config core.hooksPath .githooks
+#
+# Python is found by running it, not by name, as pre-commit does: Windows ships a `python3` stub.
+# `py -3` is the launcher a python.org install leaves without PATH; $py is unquoted so it splits
+# into two words.
+
+set -eu
+
+root="$(git rev-parse --show-toplevel)"
+for py in python3 python "py -3"; do
+    if $py -c pass >/dev/null 2>&1; then
+        exec $py "$root/devtools/checks/check-commit-msg.py" "$1"
+    fi
+done
+# A check that could not run does not pass: refused, as pre-commit refuses.
+echo "commit-msg: no working Python (tried python3, python and py -3), so the message was not checked. Install Python 3.11+ and commit again." >&2
+exit 1

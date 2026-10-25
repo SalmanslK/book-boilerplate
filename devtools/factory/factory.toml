@@ -1,0 +1,497 @@
+# The AI factory's configuration for this repository — written by the kit's init.py
+# for the pytest stack. Every project-specific rule lives here; the referee
+# (factory.py) and the guard (hooks/guard.py) carry none of their own.
+#
+# A person confirms every change to this file — the guard asks.
+
+# The kit release that installed or last upgraded this factory: written by init.py, moved by
+# init.py --upgrade, read back by `factory version` and the Factory app. Not a rule; leave it.
+kit_version = "1.7.1"
+runs_dir = "docs/factory/runs"
+evidence_dir = ".factory/evidence"
+base_ref = "main"
+protected_branches = ["main"]
+
+# ---------------------------------------------------------------- the guard
+[guard]
+# Change an existing file here: refused. Add a new one: allowed.
+read_only = ["requirements/**"]
+read_only_maintained = ["requirements/read-me.txt", "requirements/**/read-me.txt"]
+read_only_reason = "is read-only in this repository."
+# A file matching these that already exists on base_ref may not change.
+applied = []
+applied_reason = "is already on the base branch; add a new one instead."
+never_by_hand = []
+never_by_hand_reason = "is written by a tool, never by hand."
+ask = [".claude/settings.json", ".claude/settings.local.json", "devtools/factory/**", ".githooks/**",
+       "bitbucket-pipelines.yml", ".github/workflows/**"]
+non_dev_targets = ["uat", "prod", "production", "preprod", "staging"]
+dotnet_ef = false
+appsettings_secrets = false
+
+[guard.generated]
+"docs/factory/runs/INDEX.md" = "python3 devtools/factory/factory.py index"
+
+# ---------------------------------------------------------------- requirements and records
+[requirements]
+id_prefix = "REQ"
+traceability = "docs/Audit/spec-traceability.md"
+defect_logs = ["docs/defects.md"]
+# Where feature status lives: a run that is not a defect's names itself in its feature's row here.
+tracker = "docs/project.md"
+
+# Where the requirements snapshots are. `fsd_dir` holds the FSD, one file per revision named
+# `<Name> - V<n>.<ext>`; `version` finds the number, and the highest wins (numerically, not
+# lexically). A run's Spec names the revision it read once a snapshot is there.
+# `feature_depth` is the outline depth a feature row stands for (2: §2.1, §2.2 …) when the book
+# is generated from the FSD.
+[requirements.sources]
+fsd_dir = "requirements/fsd"
+version = ' - V(\d+)\.(?:pdf|docx|md|txt)$'
+feature_depth = 2
+
+# ---------------------------------------------------------------- the book
+# docs/project.md's generated task tables (devtools/checks/gen-task-rollup.py) count the tasks
+# of `our_role` — one role, or a list for a team that builds several halves (setup writes the roles of the
+# stacks it installs: BE for .NET or Python, FE for React); a plan's task may name any of `roles`. `foundation` is the only features
+# Phase 0 may hold — the ground every other feature stands on, with or without an FSD section.
+#
+# A book run (`factory start book:project --new-branch`) writes project.md from the newest FSD
+# snapshot in `fsd_dir`, at `feature_depth` ([requirements.sources]). `fsd_version` has two groups,
+# the revision and the extension; a .docx, .md or .txt beside a PDF of the same V<n> is the one read.
+# `not_a_feature_reasons` is the closed list a section that is no feature may give. `checks` run as
+# evidence once project.md is written.
+[book]
+our_role = "BE"
+roles = ["BE", "FE", "QA", "BA", "DevOps"]
+foundation = ["Boilerplate and architecture", "Deployment and environments", "Authentication plumbing"]
+fsd_version = ' - V(\d+)\.(docx|md|txt|pdf)$'
+not_a_feature_reasons = ["introduction", "glossary", "reference", "front-end only", "out of scope", "superseded"]
+checks = ["python3 devtools/checks/gen-task-rollup.py --check", "python3 devtools/checks/check-book.py"]
+# The product's system overview: the first book writes it from the FSD where it is still the template
+# (`<!-- FILL`), a revision run refreshes it where a change touches it. A project without the page is not asked for one.
+overview = "docs/system-overview.md"
+
+# The audit step: an independent, read-only reader of project.md against the FSD (a revision run's
+# triage, against both versions), like [review]. NOT READY reopens the features step (a revision's
+# triage) with its findings, at most `max_retries` times in a drive; then the referee writes an
+# Escalation and a person decides.
+[book.audit]
+agent = "book-auditor"
+max_retries = 2
+max_budget_usd = 3
+allowed_tools = ["Read", "Grep", "Glob", "Bash(git show*)", "Bash(git ls-tree*)", "Bash(pdftotext*)"]
+
+# ---------------------------------------------------------------- plans
+# What a plan run (`plan:<feature-slug>`) and a plan task's run (`plan:<stem>#<n>`) read and write.
+# The slug is the feature's row name in the tracker, lower case, words joined by dashes. `plan_check`
+# is the roll-up's own check of every plan's shape, run as evidence when a plan is drafted and when a
+# task is packaged. A task a run builds is one of `[book] our_role`'s. `branches` names what
+# `factory start … --new-branch` cuts, by item: {slug} {stem} {task} {name} {item} {title} are filled in.
+[backlog]
+plans_dir = "docs/plans"
+template = "docs/plans/_template.md"
+plan_check = "python3 devtools/checks/gen-task-rollup.py --check"
+
+[backlog.branches]
+plan = "chore/docs-plan-{slug}"
+task = "feature/{stem}-t{task}"
+book = "setup/book-{name}"
+# `revision:V<n>` (a new FSD version taken into the book): {version} is the number.
+revision = "setup/revision-v{version}"
+defect = "fix/{item}-{title}"
+bug = "fix/{item}-{title}"
+other = "feature/{item}-{title}"
+
+[impact]
+source_roots = ["src/"]
+# Beyond the source roots, what reaches everything and so runs every test.
+cross_cutting = ["pyproject.toml", "requirements*.txt", "setup.cfg", "tests/conftest.py", "conftest.py"]
+one_way = []
+one_way_note = "Contains a change that reverting cannot undo."
+
+# ---------------------------------------------------------------- the stack adapter: pytest
+# Tests are tagged @pytest.mark.ac("R-001.AC-1"); the kit's conftest plugin adds
+# `--ac a,b` to run only the tests of those criteria. Results are JUnit XML.
+
+[adapter]
+name = "pytest"
+acceptance_note = "The tests ran under the referee; evidence from a deployed environment comes after the merge."
+test_files = ["tests/**/*.py"]
+skip_parts = ["__pycache__", ".venv", "venv", ".pytest_cache"]
+criterion_marker = '@pytest\.mark\.ac\(\s*"([^"]+)"\s*\)'
+project_depth = 0
+run_tests = 'python3 -m pytest -q -p no:cacheprovider --junitxml "{results}/results.xml"'
+run_tests_filtered = 'python3 -m pytest -q -p no:cacheprovider --ac "{filter}" --junitxml "{results}/results.xml"'
+criterion_filter = "{ac}"
+criteria_join = ","
+results = "junit"
+results_file = "results.xml"
+# Python has no compile step that can fail for a missing symbol: a test importing what the
+# build step will add fails at collection, which pytest reports as a failed test — red.
+compile_error = '(?!)'
+missing_symbol_errors = []
+
+[commands]
+build = "python3 -m compileall -q src tests"
+test_projects_always = ["."]
+integration_project = ""
+integration_filter = ""
+verify = ["python3 devtools/factory/factory.py index --check"]
+
+# The code rules a regular expression holds honestly, refused at every commit by
+# devtools/checks/check-code-rules.py (the pre-commit hook): each one a generic rule in CLAUDE.md's
+# Coding principles. `files` and `exempt` are globs from the stack's root; a line matching `skip_lines`
+# (a comment) is not judged. The one place a rule allows goes in its `exempt`, with the reason beside it.
+# A catch-all with a re-raise is legitimate, which a regular expression cannot tell: only bare `except:`.
+[[code_rules]]
+id = "clock"
+pattern = '\bdatetime\.(?:now|utcnow|today)\(|\bdate\.today\(|(?<![\w.])time\.time(?:_ns)?\('
+files = ["src/**/*.py"]
+# The one module that reads the system clock, injected everywhere else.
+exempt = ["src/**/clock.py"]
+skip_lines = '^\s*#'
+message = "take the time from the injected clock, never the system clock in place (CLAUDE.md, Coding principles: time comes from an injected clock)."
+
+[[code_rules]]
+id = "bare-except"
+pattern = '^\s*except\s*:'
+files = ["src/**/*.py"]
+exempt = []
+message = "catch the exception you can handle; a bare except also swallows KeyboardInterrupt and SystemExit (CLAUDE.md, Coding principles: catch only the failures you can handle)."
+
+[[code_rules]]
+id = "print"
+pattern = '(?<![\w.])print\('
+files = ["src/**/*.py"]
+# A command-line entry point writes its output to the terminal.
+exempt = ["src/**/__main__.py"]
+skip_lines = '^\s*#'
+message = "log through the logging module with named fields, never print (CLAUDE.md, Coding principles: structured logging)."
+
+[[code_rules]]
+id = "vague-name"
+pattern = '^\s*class\s+\w*(?:Helper|Utility|Utilities|Utils)\b'
+files = ["src/**/*.py"]
+exempt = []
+message = "name the class for what it is or does, never Helper or Utility (CLAUDE.md, Coding principles: name things for what they are)."
+
+[drive]
+claude = "claude"
+model = ""
+permission_mode = "acceptEdits"
+setting_sources = "project,local"
+max_budget_usd_per_step = 5
+max_attempts = 3
+compact_above_tokens = 120000
+# "step": a fresh session per step (steps naming the same `session` share one); "run": one for the run.
+session = "step"
+allowed_tools = [
+  "Read", "Edit", "Write", "Glob", "Grep",
+  "Bash(python3 devtools/factory/factory.py check*)",
+  "Bash(python3 devtools/factory/factory.py status*)",
+  "Bash(python3 devtools/factory/factory.py impact*)",
+  "Bash(python3 devtools/factory/factory.py reopen*)",
+  "Bash(python3 devtools/factory/factory.py verify*)",
+  "Bash(python3 devtools/factory/factory.py pr-body*)",
+  # A book run regenerates the task roll-up after writing project.md, and checks the book.
+  "Bash(python3 devtools/checks/gen-task-rollup.py*)", "Bash(python3 devtools/checks/check-book.py*)",
+  "Bash(git status*)", "Bash(git diff*)", "Bash(git log*)", "Bash(git show*)",
+  "Bash(git add*)", "Bash(git commit*)", "Bash(git rm*)", "Bash(git mv*)",
+  "Bash(python3 -m pytest*)", "Bash(python -m pytest*)", "Bash(python3 -m compileall*)",
+]
+
+# ---------------------------------------------------------------- steps
+# `kinds`: the kinds of run that pass through a step — `change` (a defect, a question, a feature
+# slice, a plan's task `plan:<stem>#<n>`), `plan` (`plan:<feature-slug>`: one feature's plan, on
+# demand), `book` (`book:<name>`: project.md from the FSD) and `revision` (`revision:V<n>`: a new FSD
+# version taken into the book). Left out, a change run's only. One list serves every kind, in this
+# order; a step's name is unique across them.
+[[steps]]
+name = "intake"
+check = "intent"
+session = "understand"
+kinds = ["change", "plan"]
+writes = []
+
+[[steps]]
+name = "context"
+check = "context"
+session = "understand"
+kinds = ["change", "plan"]
+writes = []
+
+# ---- a plan run's own steps: what the plan is written from, the plan, a person's approval of it.
+# The plan is docs/plans/<slug>.md from [backlog] template; each of its §9 tasks is then a change
+# run of its own, `plan:<stem>#<n>`, which writes itself back into that task's row at package.
+[[steps]]
+name = "sources"
+check = "sources"
+session = "understand"
+kinds = ["plan"]
+writes = ["docs/open-questions.md"]
+
+[[steps]]
+name = "draft-plan"
+check = "plan-doc"
+session = "design"
+kinds = ["plan"]
+writes = ["docs/plans/**", "docs/open-questions.md", "docs/project.md"]
+
+[[steps]]
+name = "plan-gate"
+gate = true
+kinds = ["plan"]
+
+# ---- a book run's steps: project.md from the FSD. The referee reads the FSD's outline itself; the
+# inventory and features sessions write; the referee checks project.md
+# (devtools/factory/check_project_md.py); the book auditor reads it; a person approves it.
+[[steps]]
+name = "outline"
+# The referee reads the FSD's own headings; a PDF's outline needs a person at outline-gate.
+check = "fsd-outline"
+auto = true
+kinds = ["book"]
+writes = []
+
+[[steps]]
+name = "outline-gate"
+gate = true
+kinds = ["book"]
+
+[[steps]]
+name = "inventory"
+check = "fsd-coverage"
+session = "book"
+kinds = ["book"]
+writes = ["docs/open-questions.md"]
+
+[[steps]]
+name = "features"
+check = "project-md"
+session = "book"
+kinds = ["book"]
+# The first book also writes the system overview ([book] overview) where it is still the template.
+writes = ["docs/project.md", "docs/open-questions.md", "docs/system-overview.md"]
+
+# ---- a revision run's steps (`factory start revision:V<n> --new-branch`): a new FSD version taken
+# into the book. The referee compares it with the version before it; a session works out what each
+# change means for the book; the auditor reads that against both versions (the audit step below, shared
+# with the book); a person approves it at revision-gate. The book only — never code: a built feature's
+# change is a change item, built by a run of its own.
+[[steps]]
+name = "changes"
+check = "fsd-changes"
+auto = true
+kinds = ["revision"]
+writes = []
+
+[[steps]]
+name = "triage"
+check = "revision-triage"
+session = "revision"
+kinds = ["revision"]
+writes = ["docs/project.md", "docs/open-questions.md", "docs/archive/questions-resolved.md", "docs/system-overview.md",
+          "docs/plans/**", "docs/defects.md"]
+
+[[steps]]
+name = "audit"
+check = "book-audit"
+auto = true
+kinds = ["book", "revision"]
+writes = []
+
+[[steps]]
+name = "book-gate"
+gate = true
+kinds = ["book"]
+
+[[steps]]
+name = "revision-gate"
+gate = true
+kinds = ["revision"]
+
+# ---- the change run's steps from here; package is shared.
+
+[[steps]]
+name = "spec"
+check = "spec"
+writes = ["docs/open-questions.md"]
+
+[[steps]]
+name = "spec-gate"
+gate = true
+
+[[steps]]
+name = "design"
+check = "design"
+session = "design"
+writes = ["docs/plans/**", "docs/open-questions.md"]
+
+[[steps]]
+name = "design-gate"
+gate = true
+when = "High"
+
+[[steps]]
+name = "plan"
+check = "plan"
+session = "design"
+writes = []
+
+[[steps]]
+name = "tests"
+check = "tests-red"
+writes = ["tests/**"]
+
+[[steps]]
+name = "build"
+check = "build"
+writes = ["src/**", "docs/**", "README.md", "Dockerfile", ".dockerignore", "compose.yaml", ".env.example"]
+
+[[steps]]
+name = "integrate"
+check = "integrate"
+auto = true
+writes = []
+
+[[steps]]
+name = "verify"
+check = "verify"
+auto = true
+writes = []
+
+[[steps]]
+name = "review"
+check = "review"
+auto = true
+writes = []
+
+[[steps]]
+name = "accept"
+# Written by the referee from its own evidence: red before the build, green at the reviewed commit.
+check = "acceptance"
+auto = true
+writes = []
+
+[[steps]]
+name = "package"
+check = "package"
+# The run writes itself back into the book: its defect's row, or its feature's row in project.md.
+# A plan's task names its run in the plan's task row; a plan run names itself in its feature's row.
+# A book run commits what it wrote.
+kinds = ["change", "plan", "book", "revision"]
+writes = ["docs/project.md", "docs/defects.md", "docs/plans/**"]
+
+# The merge gate: a person other than the AI approves the finished work. Two ways, one line:
+#   check = "bitbucket-approval"  the pull request approved in Bitbucket by someone other than its
+#                                 author, for the commit the run checked (a project with a remote);
+#   check = "local-approval"      no remote, so no pull request: a person runs `factory approve merge`
+#                                 from their own terminal (or presses Approve in the Factory app) after
+#                                 reading the evidence; held to the same evidence rules.
+# init.py writes bitbucket-approval unless told --merge-check local; setup.py writes local-approval for a
+# project with no remote.
+[[steps]]
+name = "merge-gate"
+gate = true
+check = "local-approval"
+kinds = ["change", "plan"]
+
+[[steps]]
+name = "release"
+check = "section:Release"
+writes = []
+
+[[steps]]
+name = "outcome"
+check = "section:Outcome"
+writes = []
+
+# ---------------------------------------------------------------- the reviewer and Bitbucket
+# [bitbucket] and [protection] matter only to a project with a Bitbucket remote.
+[review]
+agent = "factory-reviewer"
+max_budget_usd = 5
+allowed_tools = ["Read", "Grep", "Glob", "Bash(git show*)", "Bash(git diff*)", "Bash(git log*)"]
+
+# The requirements audit at verify, off until this table is uncommented: the spec auditor
+# (.claude/agents/factory-spec-auditor.md) checks the change against each requirement id the Spec
+# names, with /fsd-audit's method, in a session of its own, and the referee reads its verdict. It
+# runs only when the Spec names a requirement id, and costs a second session per verify.
+# [audit]
+# agent = "factory-spec-auditor"
+# max_budget_usd = 4
+# allowed_tools = ["Read", "Grep", "Glob", "Bash(git show*)", "Bash(git diff*)", "Bash(git log*)",
+#                  "Bash(git status*)", "Bash(git ls-tree*)", "Bash(git cat-file*)", "Bash(ls*)", "Bash(pdftotext*)"]
+
+# The PR's author is the person who drove the run (`factory open-pr`, their own credentials);
+# their own approval does not count. List any other account whose approval must not count.
+[bitbucket]
+excluded_identities = []
+
+[bitbucket.approvals]
+Low = 1
+Medium = 1
+High = 2
+
+# Read when the merge gate's check is github-approval.
+[github]
+excluded_identities = []
+
+[github.approvals]
+Low = 1
+Medium = 1
+High = 2
+
+[protection]
+branches = ["main"]
+kinds = ["delete", "force", "push"]
+
+[protection.minimums]
+require_approvals_to_merge = 1
+require_passing_builds_to_merge = 1
+
+# ---------------------------------------------------------------- tier, budget, ownership
+[tier]
+high = ["(^|/)auth", "security", "migration", "(^|/)\\.env", "Dockerfile", "secret"]
+medium = ["^src/"]
+
+[budget]
+Low = 400
+Medium = 1200
+High = 2000
+excluded = ["docs/factory/runs/**"]
+
+[budget.tests]
+Low = 1200
+Medium = 3000
+High = 5000
+
+[ownership]
+always = ["docs/**"]
+
+# ---------------------------------------------------------------- the git hooks' checks
+# devtools/checks/, run by .githooks/: on a fix branch (the prefix of [backlog.branches] defect) the
+# commit message names what it fixes, matched by `fix_id` — a defect D<n>, a question Q<n> or a
+# tracker key such as SHOP-12; check-rules.py looks for the scripts an [enforced] rule names in
+# `ci_files`, as well as in the pre-commit hook and this file.
+[checks]
+fix_id = '\b([DQ]\d+|[A-Z][A-Z0-9]+-\d+)\b'
+ci_files = ["bitbucket-pipelines.yml", ".github/workflows/*.yml", ".github/workflows/*.yaml", ".gitlab-ci.yml"]
+
+# ---------------------------------------------------------------- rule promotion
+# Every defect row ends *Class: <slug> · found <date>*. The report proposes the `propose`
+# classes found most in the last `window_days` days (at least `threshold` each); a class
+# with a rule counts only defects found after its newest rule. Adjust the classes to the
+# project's own mistakes; add each enforced rule as a [[promotion.rules]] entry:
+#   [[promotion.rules]]
+#   class = "code-convention"
+#   rule = "the convention tests"
+#   since = "2026-10-01"
+[promotion]
+classes = ["spec-divergence", "api-contract", "input-validation", "settings-deploy", "test-gap",
+           "ci-test-infra", "docs-drift", "concurrency", "access-control", "code-convention"]
+window_days = 30
+threshold = 3
+propose = 3
+rule_docs = ["CLAUDE.md"]

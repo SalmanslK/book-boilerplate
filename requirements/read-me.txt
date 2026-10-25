@@ -1,0 +1,91 @@
+What this folder is
+===================
+
+Read-only snapshots of the requirements: the documents the client or product
+owner gives us to build from. We do not write requirements here; we keep
+copies of theirs, so a plan, a spec or a test can cite exactly the text it was
+built from.
+
+The requirements are the FSD for Book Boilerplate: `requirements/fsd/Book Boilerplate - V1.md` (V1), filed at project
+setup on 2026-10-25. Its owner and live copy: not recorded yet - delivered as a file.
+
+The requirements are the source of truth and win every conflict. Where they
+are silent, the supporting documents here are the best evidence. A design
+showing something the requirements do not specify is not a requirement.
+Where the requirements contradict themselves, ask - the question goes to
+docs/open-questions.md.
+
+Versioning
+----------
+
+- The FSD lives in requirements/fsd/; its versioning and its Last checked
+  line are in requirements/fsd/read-me.txt. Every other source follows the
+  same rule, in a folder of its own.
+- Every revision is a NEW file, never an overwrite:
+
+      <name> - V<n>.<ext>
+
+  e.g. "Product Spec - V1.pdf", "Product Spec - V2.pdf".
+- Build from the HIGHEST number. Compare the numbers, not the names: a
+  lexical sort puts V9 after V15.
+- Change nothing but the version number between revisions, so the folder
+  itself is the version history. Earlier revisions stay, so a comparison can
+  be re-run.
+- What changed in the latest revision is written up in docs/project.md,
+  Part 3 - Requirements history. Diff each new revision before building from
+  it.
+- A document that is not versioned this way (a delivered image, a file with
+  no live source) says so in a line below, so "not versioned" always means
+  "confirmed", never "nobody checked".
+
+requirements/fsd/Book Boilerplate - V1.md -> the FSD -> none recorded - delivered as a file -> versioned (V<n>)
+
+Live documents move without notice
+----------------------------------
+
+A snapshot can be behind the live document. Before trusting a section -
+before a plan, an estimate, chasing an open question or a release - check the
+live source. /requirements-check does this, and captures a new revision
+if it has moved.
+
+Test cases, checklists and similar material from QA may be kept here as
+evidence, but they are NOT requirements. A rule found only there is a
+question until the requirements confirm it.
+
+Who may add to it
+-----------------
+
+- A person, adding a new revision as a new file, or
+- /requirements-check, which captures a new revision when the live
+  document has moved.
+
+Nothing else writes here. Adding a new file is allowed; changing or deleting
+an existing one is not. The factory's guard refuses edits to existing files
+here - the paths are [guard].read_only in devtools/factory/factory.toml. A
+file that must be maintained by hand (this read-me, a source index) is listed
+in [guard].read_only_maintained, or a person makes the change outside the
+guard.
+
+Requirement ids
+---------------
+
+A requirement is cited as <prefix>-<section>-R<n>, e.g. REQ-2.4-R03, where
+<prefix> is [requirements].id_prefix in devtools/factory/factory.toml
+(default REQ). The ids are assigned by /fsd-audit in
+docs/Audit/spec-traceability.md, never renumbered and never reused.
+
+
+Sources
+-------
+
+One entry per source; /requirements-check checks each (`all` checks every one).
+The fields and what each means are in .claude/skills/requirements-check/SKILL.md.
+A source with a live location and no entry here goes unchecked.
+
+Name:         Book Boilerplate FSD
+Role:         requirements
+Live:         none recorded - delivered as a file
+Export:       save each revision as requirements/fsd/Book Boilerplate - V<n>.docx
+Comments:     no
+Snapshot:     versioned
+Last checked: never

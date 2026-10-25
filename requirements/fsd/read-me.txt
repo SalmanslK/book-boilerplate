@@ -1,0 +1,52 @@
+The FSD - the functional specification
+======================================
+
+This folder holds every revision of the FSD as a read-only snapshot. It is the
+source of truth and wins every conflict (requirements/read-me.txt). Its live
+link, if it has one, is in requirements/read-me.txt - the one place every
+requirements link is kept.
+
+Versioning
+----------
+
+- One file per revision, never an overwrite:
+
+      <Name> - V<n>.<ext>
+
+  e.g. "Shop FSD - V1.docx", "Shop FSD - V2.docx". <ext> is one of docx
+  (preferred: its headings are read without a model), md, txt or pdf - the
+  `version` pattern in [requirements.sources] of devtools/factory/factory.toml.
+- The HIGHEST number wins. Compare the numbers, not the names: a lexical sort
+  puts V9 after V15.
+- Keep <Name> the same from revision to revision, so the folder itself is the
+  version history. Earlier revisions stay, so a comparison can be re-run.
+- What the latest revision changed is docs/project.md, Part 3 - Requirements
+  history; earlier comparisons are docs/archive/requirements-history.md.
+
+How a new snapshot arrives
+--------------------------
+
+- A person adds it as a new file with the next number - by hand, or by the
+  factory console's project setup (the first one is V1). Diff it against the
+  one before and write the comparison in docs/project.md Part 3 before
+  building from it.
+- Or /requirements-check, which reads the live document and captures a new
+  revision when it has moved.
+
+Nothing else writes here. Adding a new file is allowed; changing or deleting
+an existing one is not - the guard refuses it ([guard].read_only). This
+read-me is the one maintained file ([guard].read_only_maintained).
+
+Last checked
+------------
+
+The line below is overwritten by each check of the live document; earlier
+lines go to docs/archive/requirements-history.md. Its shape:
+
+    Last checked: <YYYY-MM-DD> - <captured V<n> | unchanged (V<n>) | could not check - <why>>
+                  [(modifiedTime <the live document's, as the read returned it>)]
+
+The modifiedTime, when the live source gives one, is what a factory run's
+Spec compares with when it says the FSD is "up to date".
+
+Last checked: never - no live source recorded yet.

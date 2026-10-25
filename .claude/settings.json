@@ -1,0 +1,31 @@
+{
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell|Monitor|Read|Grep|Glob|NotebookRead",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "for py in python3 python; do if \"$py\" -c pass >/dev/null 2>&1; then exec \"$py\" \"${CLAUDE_PROJECT_DIR:-.}/devtools/factory/hooks/guard.py\"; fi; done; echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"guard: no working Python on PATH, so the guard could not judge this call and refuses it. Install Python 3.11+ and put it on PATH.\"}}'",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "for py in python3 python; do if \"$py\" -c pass >/dev/null 2>&1; then exec \"$py\" \"${CLAUDE_PROJECT_DIR:-.}/devtools/factory/hooks/guard.py\"; fi; done",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

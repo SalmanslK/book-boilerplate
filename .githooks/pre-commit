@@ -1,0 +1,43 @@
+#!/bin/sh
+#
+# Tracked in the repository, because .git/hooks is per-clone and cannot be shared. The kit's
+# install turns it on; in a new clone, once:
+#
+#     git config core.hooksPath .githooks
+#
+# Build-free checks only, so a commit stays quick: the book's rules, nothing personal or secret,
+# no protected file changed, no banned call added to the code, the generated task roll-up current,
+# every enforced rule still enforced.
+# Add the project's own build-free checks below the kit's; CI, where there is one, runs the same.
+#
+# Python is found by running it, not by name: Windows ships a `python3` stub that only offers to
+# install one, and a name check would find it and then fail every commit. `py -3` is the launcher a
+# python.org install leaves when its "add to PATH" box was not ticked; $py is left unquoted so it
+# splits into two words.
+
+set -eu
+
+root="$(git rev-parse --show-toplevel)"
+for py in python3 python "py -3"; do
+    if $py -c pass >/dev/null 2>&1; then
+        # The book's own rules: links resolve, every document has an owner, history in the archive.
+        $py "$root/devtools/checks/check-book.py"
+        # Nothing personal or secret in what this commit adds: no credential, no home-folder path, and
+        # not the committer's own email or machine name.
+        $py "$root/devtools/checks/check-private-data.py" --staged
+        # No read-only file (the requirements snapshots) or applied file changed: [guard] in factory.toml.
+        $py "$root/devtools/checks/check-protected-paths.py" --staged
+        # The lines this commit adds break none of the stack's code rules ([[code_rules]] in factory.toml):
+        # the system clock read in place, a task blocked on, a catch-all, a stray print.
+        $py "$root/devtools/checks/check-code-rules.py" --staged
+        # docs/project.md's task tables match the plans they are generated from.
+        $py "$root/devtools/checks/gen-task-rollup.py" --check
+        # Every rule marked [enforced] still names a test or check that exists and runs.
+        $py "$root/devtools/checks/check-rules.py" --check
+        exit 0
+    fi
+done
+
+# No working Python: the checks above could not run, and a check that could not run does not pass.
+echo "pre-commit: no working Python (tried python3, python and py -3), so the book, private-data, protected-paths, code-rules, task roll-up and rules checks could not run. Install Python 3.11+ and commit again." >&2
+exit 1
