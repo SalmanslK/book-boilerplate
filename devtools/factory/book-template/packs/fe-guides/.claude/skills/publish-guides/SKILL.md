@@ -256,3 +256,4 @@ cause is fixed; never report it as published.
 - Unmatched Docs and `… (copy)` duplicates: the person decides and trashes them by hand.
 - A guide found wrong while publishing: fix it in the repository first (a defect row if the
   code is wrong), then publish again.
+- **In a flow** (`/book:flow`): `new-fsd-revision` → `/book:progress`; `finish-feature` → `/book:progress`; `after-merge` → `/book:check-sources`; `guides-drift` → `/book:write-for`.

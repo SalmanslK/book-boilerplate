@@ -79,3 +79,4 @@ Show the draft and **stop for approval**.
 - The FE guides changed in this build: **`/publish-guides`**, so the Drive copy matches.
 - A short summary for a PM or the client: **`/book:write-for <reader>`**.
 - A gap found while writing that has no defect or question yet: record it the day it is found.
+- **In a flow** (`/book:flow`): `qa-build` → `/deploy`.

@@ -15,7 +15,8 @@ A map of how the team works with Claude Code here — not a second rulebook. The
 
 Each skill says when to use it in its own description. The flow of a change:
 `/book:impact` → plan → code and self-tests → `/book:self-review` → `/book:commit` → `/book:ship` (the local CI, the
-description, the pull request when the person asks) → `/book:peer-review` by a teammate.
+description, the pull request when the person asks) → `/book:peer-review` by a teammate. `/book:flow` lists the ready-made
+recipes for this and seventeen other situations, and walks one.
 
 ### Which docs skill
 
@@ -33,6 +34,7 @@ Documentation skills differ by **what they compare**:
 | `/book:raise` (`defect` or `question`) | one ledger entry ← a finding | Writes the row; never posts an FSD comment unasked |
 | `/book:write-for` | a short message ← the Book, for one non-engineer | Drafts only; never sends |
 | `/book:upgrade` | the Book ↔ a newer template | Reports, applies on approval |
+| `/book:flow` | which skills a situation needs, in order ← its recipe | Lists the 18 recipes, or walks one; stops at each approval |
 
 ### The names before v1.3.0
 

@@ -160,3 +160,4 @@ trivial", and is still applied only on approval.
 - Guides changed and merged: **`/publish-guides`**. The FE team reads Drive, not the repository.
 - A guide agrees with the code, but the code may not agree with the FSD: **`/book:fact-check <module>`**.
 - A requirement looks moved: **`/book:check-sources`**.
+- **In a flow** (`/book:flow`): `new-fsd-revision` → `/publish-guides`; `answers-arrived` → done; `finish-feature` → `/book:update-docs`; `docs-health` → done; `guides-drift` → `/publish-guides`; `qa-build` → `/release-notes`.

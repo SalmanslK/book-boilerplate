@@ -169,3 +169,4 @@ a step to get a better answer, and never work around a check by running its comm
 - **FAILED and kept:** a confirmed defect gets a `docs/defects.md` row today (CLAUDE.md, Features).
 - **Stop** after the report. Don't start another deploy, or a fix, in the same turn without being
   asked.
+- **In a flow** (`/book:flow`): `qa-build` → `/book:write-for`; `dev-deploy` → `/book:raise`.
