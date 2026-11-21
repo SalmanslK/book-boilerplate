@@ -3,10 +3,10 @@
 # run, and what the branch restrictions must be. Read by factory.py, hooks/guard.py and the checks.
 # A person confirms every change to this file — the guard asks.
 #
-# This is the boilerplate's own copy, for its own Book (stack "none"). `factory book init` writes a
+# This is the boilerplate's own copy, for its own Book (stack "none"). `book init` writes a
 # project's copy from book-template/skeletons/factory.toml.tmpl with the same keys.
 
-book_version = "1.3.4"
+book_version = "1.4.0"
 base_ref = "origin/main"
 protected_branches = ["main"]
 # Each person's private settings file — outside every repository, never read by a session
@@ -14,8 +14,8 @@ protected_branches = ["main"]
 # overrides it.
 private_settings = "~/.boilerplate/local.toml"
 
-# This project's own names, for `factory book verify` (a name the Book template carries from another
-# project is a leftover; these are not) and the names `factory book init` wrote.
+# This project's own names, for `book verify` (a name the Book template carries from another
+# project is a leftover; these are not) and the names `book init` wrote.
 [book]
 name = "Boilerplate"
 title = "Book Boilerplate"
@@ -71,7 +71,7 @@ service_accounts = []
 drive_connector = '(?i)^mcp__.*drive'
 drive_read_verbs = ["read", "search", "list", "get", "fetch", "download", "export", "find"]
 rclone_deleting = ["delete", "deletefile", "purge", "rmdir", "rmdirs", "cleanup", "dedupe", "sync", "bisync"]
-drive_reason = "A session never creates, moves or deletes on Google Drive; the FE guides reach it only through /publish-guides."
+drive_reason = "A session never creates, moves or deletes on Google Drive; the FE guides reach it only through /book:publish-guides."
 
 # Generated documents: path = the command that writes them (the dotnet pack adds its own).
 [guard.generated]
@@ -80,7 +80,7 @@ drive_reason = "A session never creates, moves or deletes on Google Drive; the F
 id_prefix = "FSD"
 traceability = "docs/Audit/spec-traceability.md"
 
-# `factory fsd-threads`: the live FSD Doc against the last check. The Doc's link is the line of
+# `book fsd-threads`: the live FSD Doc against the last check. The Doc's link is the line of
 # `links_file` starting with `fsd_link_label`; the last check is recorded in `live_check_record`.
 # The credential is a person's: `live_credential` lives in their private settings file.
 [requirements.sources]
@@ -92,7 +92,7 @@ fsd_link_label = "FSD"
 snapshot_dirs = []
 out_of_scope = []
 
-# `factory requirements status`: the folder under requirements/ that holds each LINKS line's snapshots.
+# `book requirements status`: the folder under requirements/ that holds each LINKS line's snapshots.
 [requirements.sources.folders]
 "FSD" = "fsd"
 
@@ -129,7 +129,7 @@ high = ["^devtools/factory/hooks/", "^\\.claude/settings"]
 medium = ["^devtools/"]
 checks_only = ["docs/**", "requirements/**", "**/*.md"]
 
-# `factory review-scope`: which parts of the review checklist a change needs read.
+# `book review-scope`: which parts of the review checklist a change needs read.
 [review_scope]
 folder = ".claude/review"
 always = ["book:peer-review/references/review-method.md", "book:peer-review/references/review-pass-a.md"]
@@ -149,8 +149,8 @@ not_applicable = ["B0"]
 
 # ---------------------------------------------------------------- the files that steer the AI, the tracker, the host
 
-# A pull request that changes one passes `factory ai-files` only when an owner made it, or an owner
-# approved it after its latest commit. Owners are Git-host account ids (`factory pr whoami`). An empty
+# A pull request that changes one passes `book ai-files` only when an owner made it, or an owner
+# approved it after its latest commit. Owners are Git-host account ids (`book pr whoami`). An empty
 # list fails closed. Without a Bitbucket remote `ai-files` reports N/A.
 [ai_files]
 owners = [
@@ -163,12 +163,12 @@ paths = [
 ]
 except = []
 
-# Where `factory jira <key>` reads an issue from. Empty = no tracker; `factory jira` says so.
+# Where `book jira <key>` reads an issue from. Empty = no tracker; `book jira` says so.
 [jira]
 site = ""
 project = ""
 
-# What `factory protection --check` holds the live branch restrictions to.
+# What `book protection --check` holds the live branch restrictions to.
 [protection]
 branches = ["main"]
 kinds = ["delete", "force", "push"]

@@ -15,7 +15,7 @@ factory — the AI tools a session and a person use, each holding its own creden
     factory requirements status                    offline: every requirements source, its snapshot, the weekly rule
     factory sync-plan [--mode delta|full|verify-only]   read-only: /book:sync-sources's baseline, mode, delta set
     factory impact [paths...]                      what the change reaches: modules, tests, guides, requirement ids
-    factory deploy check|gate|changes|up|smoke|revert|report   /deploy's steps, DEV and QA only
+    factory deploy check|gate|changes|up|smoke|revert|report   /book:deploy's steps, DEV and QA only
     factory deploy status [--target dev|qa|all]   read-only: the commit each environment runs
     factory book verify [--target <repo>]                  whether the Book is set up (read-only): READY or not
     factory book upgrade --target <repo> [--apply]         drift against a newer template; --apply updates unchanged files
@@ -1668,7 +1668,7 @@ def command_impact(root: Path, config: Config, args: argparse.Namespace) -> str:
 
 
 def command_deploy(root: Path, config: Config, args: argparse.Namespace) -> tuple[str, bool]:
-    """/deploy's mechanical steps (deploy.py); DEV and QA only, the host from factory.toml."""
+    """/book:deploy's mechanical steps (deploy.py); DEV and QA only, the host from factory.toml."""
     try:
         return deploy.main(root, config.raw, args)
     except deploy.DeployError as error:
@@ -1936,9 +1936,9 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def parser() -> argparse.ArgumentParser:
+def parser(prog: str = "factory") -> argparse.ArgumentParser:
     # No abbreviations: an abbreviated option once hid the subcommand from the guard.
-    top = argparse.ArgumentParser(prog="factory", description="The AI tools: pull requests, Jira, the files that steer the AI.",
+    top = argparse.ArgumentParser(prog=prog, description="The AI tools: pull requests, Jira, the files that steer the AI.",
                                   allow_abbrev=False)
     sub = top.add_subparsers(dest="command", required=True)
     pr = sub.add_parser("pr", help="a pull request — show, comments, open, describe, comment, post, resolve, whoami; the token stays in this process")
@@ -2017,11 +2017,12 @@ COMMANDS: dict[str, Callable] = {
 }
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, prog: str = "factory") -> int:
+    """The command, as `factory` or - from v1.4.0 - `book` (devtools/book.py), which only names it differently."""
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
-    args = parser().parse_args(argv)
+    args = parser(prog).parse_args(argv)
     root = repo_root()
     try:
         # `book` and `settings` load their own: they must report a broken private settings file, not stop on it.
@@ -2029,7 +2030,7 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config(root) if args.command not in ("book", "settings", "config") else None
         result = COMMANDS[args.command](root, config, args)
     except FactoryError as error:
-        print(f"factory: {error}", file=sys.stderr)
+        print(f"{prog}: {error}", file=sys.stderr)
         return 1
     text, ok = result if isinstance(result, tuple) else (result, True)
     if text:
@@ -2037,5 +2038,12 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if ok else 1
 
 
+RENAME_NOTE = ("factory: the command is `book` now - python devtools/book.py <command> (`book verify`, `book pr open`, ...); "
+               "this name keeps working until v1.5.")
+
+
 if __name__ == "__main__":
+    # Only a person at a terminal is told: the hooks, CI and the pipelines run this file and read its output.
+    if sys.stderr.isatty():
+        print(RENAME_NOTE, file=sys.stderr)
     sys.exit(main())

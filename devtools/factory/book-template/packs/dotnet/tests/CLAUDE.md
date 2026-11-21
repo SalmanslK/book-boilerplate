@@ -93,7 +93,7 @@ this is how.
 - **The integration project has two halves, told apart by a trait.** Classes under
   `Smoke/` carry `[SmokeTest]` — `Category=Smoke` — and talk to a **deployed** host
   over HTTP; everything else is in-process. CI runs `--filter "Category!=Smoke&Category!=S3"`;
-  `/deploy` runs `--filter "Category=Smoke"` after a deploy.
+  `/book:deploy` runs `--filter "Category=Smoke"` after a deploy.
 - **The smoke half skips unless `BOILERPLATE_DEPLOYED_API_URL` is set, and that skip is
   intended** — so CI excludes it, because its gate fails the build on any skip.
 - **No `Category=S3` test exists** — S3 is proved by `S3FileStoreTests` and a check by hand on

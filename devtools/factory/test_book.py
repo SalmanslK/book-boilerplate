@@ -138,7 +138,7 @@ email-templates/
   -> designs
 """
 
-PINNED = {"book-plugins": {"source": {"source": "github", "repo": "owner/book-plugin", "ref": "v0.4.0"},
+PINNED = {"book-plugins": {"source": {"source": "github", "repo": "owner/book-plugin", "ref": "v0.5.0"},
                            "autoUpdate": False}}
 SETTINGS = {"attribution": {"commit": "", "pr": ""}, "extraKnownMarketplaces": PINNED,
             "enabledPlugins": {"book@book-plugins": True}, "hooks":{"PreToolUse": [{"matcher": MATCHER, "hooks": [
@@ -461,6 +461,14 @@ class EachCheck(BookCase):
         self.write("devtools/factory/factory.toml", FACTORY_TOML.replace('ask = ["CLAUDE.md", ".claude/**"]', 'ask = []'))
         self.assertFails(book.n15_factory_config)
 
+    def test_n15_names_a_deploy_note_no_step_reads(self):
+        self.write("devtools/factory/factory.toml", FACTORY_TOML + '\n[deploy.notes]\ncheck = "x"\nup = "y"\n')
+        self.assertPasses(book.n15_factory_config)
+        self.write("devtools/factory/factory.toml", FACTORY_TOML + '\n[deploy.notes]\ncheck = "x"\nchek = "y"\n')
+        lines = book.n15_factory_config(self.ctx())
+        self.assertIn(book.WRONG, [l.status for l in lines])
+        self.assertIn("[deploy.notes] chek", " ".join(l.render() for l in lines))
+
     def test_n16_skills(self):
         self.assertPasses(book.n16_skills)
         self.write(".claude/skills/commit/SKILL.md", SKILL.format(name="kommit"))
@@ -483,9 +491,10 @@ class EachCheck(BookCase):
             line = next(l for l in book.n16_skills(self.ctx()) if l.element == "the book plugin is pinned to a release")
             return line.status, line.render()
 
-        self.assertEqual(book.OK, pin_status()[0], "the fixture pins v0.4.0, this template's plugin_min")
+        self.assertEqual(book.OK, pin_status()[0], "the fixture pins v0.5.0, this template's plugin_min")
         source = {"source": "github", "repo": "owner/book-plugin"}
-        for ref, status in (("v9.0.0", book.OK), ("v0.3.0", book.WRONG), (None, book.WRONG), ("main", book.WRONG),
+        for ref, status in (("v9.0.0", book.OK), ("v0.3.0", book.WRONG), ("v0.4.0", book.WRONG), (None, book.WRONG),
+                            ("main", book.WRONG),
                             ("e1e60175b0fbacdcc28342946e20b41461fe7d7a", book.CONFIRM),
                             ("E1E60175B0FBACDCC28342946E20B41461FE7D7A", book.CONFIRM)):
             with self.subTest(ref):
@@ -538,6 +547,23 @@ class EachCheck(BookCase):
         self.write("devtools/factory/factory.toml", FACTORY_TOML.replace(
             'drive_folder_id = "F1"', 'drive_folder_id = "<FILL-FE-DRIVE-FOLDER-ID>"'))
         self.assertFails(book.n17_drive_folder, book.TO_FILL)
+
+    def test_n17_from_v140_the_pack_is_known_by_book_packs(self):
+        # The skill and its script are the book plugin's now: the project keeps only the rename stub.
+        stub = ("---\nname: publish-guides\ndescription: Renamed to /book:publish-guides, in the book plugin. This old "
+                "name is removed in v1.5.\ndisable-model-invocation: true\n---\n\n# /publish-guides was renamed\n")
+        self.write(".claude/skills/publish-guides/SKILL.md", stub)
+        (self.root / ".claude/skills/publish-guides/Publish-FeGuidesToDrive.ps1").unlink()
+        self.assertEqual([book.NA], self.statuses(book.n17_drive_folder), "no [book] packs: no fe-guides pack")
+        with_pack = FACTORY_TOML.replace('env_prefix = "ACME_"\n', 'env_prefix = "ACME_"\npacks = ["fe-guides"]\n')
+        self.write("devtools/factory/factory.toml", with_pack)
+        self.assertPasses(book.n17_drive_folder)
+        self.write("devtools/factory/factory.toml", with_pack.replace('drive_folder_id = "F1"', ""))
+        self.assertFails(book.n17_drive_folder, book.MISSING)
+        # A project copy of the script still there holds to the same one-owner rule.
+        self.write("devtools/factory/factory.toml", with_pack)
+        self.write(".claude/skills/publish-guides/Publish-FeGuidesToDrive.ps1", "param([string]$FolderId = 'F2')\n")
+        self.assertFails(book.n17_drive_folder)
 
     def test_n18_private_settings_names_only(self):
         self.assertPasses(book.n18_private_settings)
@@ -897,6 +923,30 @@ class PluginNotes(unittest.TestCase):
         self.assertIn("[review_scope] still reads .claude/skills/review-pr/references/", text)
         self.assertIn("3 old skill or agent file(s)", text, "the agent, the reference and the edited SKILL.md")
 
+    def test_a_v134_pack_book_is_told_its_pack_skills_moved_too(self):
+        # v1.4.0: an edited pack skill is a CONFLICT (it takes the stub), its scripts are DROPPED.
+        rows = [(book.CONFLICT, ".claude/skills/deploy/SKILL.md"),
+                (book.DROPPED, ".claude/skills/check-guides/scripts/guides_check.py"),
+                (book.CHANGED, ".claude/skills/release-notes/SKILL.md")]
+        text = self.notes('{"enabledPlugins": {"book@book-plugins": true}}', {}, rows)
+        self.assertIn("2 old skill or agent file(s) a move into the book plugin retired", text)
+        self.assertIn("v1.4.0 the packs' skills", text)
+        self.assertIn("[deploy]", text, "where an edited pack skill's project facts go")
+
+    def test_a_dropped_test_that_loads_a_retired_script_is_named_with_it(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder)
+            test = target / "devtools/checks/test_fe_guides_check.py"
+            test.parent.mkdir(parents=True)
+            test.write_text('GUIDES_CHECK = HERE / "check-guides" / "scripts" / "guides_check.py"\n', encoding="utf-8")
+            (target / "devtools/checks/test_other.py").write_text("import ledger_ids\n", encoding="utf-8")
+            rows = [(book.DROPPED, ".claude/skills/check-guides/scripts/guides_check.py"),
+                    (book.DROPPED, "devtools/checks/test_fe_guides_check.py"),
+                    (book.DROPPED, "devtools/checks/test_other.py")]
+            text = "\n".join(book.plugin_notes(target, {}, self.MANIFEST, rows))
+        self.assertIn("devtools/checks/test_fe_guides_check.py (DROPPED) load(s) a retired script", text)
+        self.assertNotIn("test_other.py", text)
+
     def test_a_book_already_on_the_plugin_hears_nothing(self):
         config = {"review_scope": {"folder": ".claude/review"}}
         self.assertEqual(self.notes('{"enabledPlugins": {"book@book-plugins": true}}', config,
@@ -934,8 +984,76 @@ UNVERSIONED_CONTRACTS = ("# API contracts\n\n## Unversioned routes\n\n| Method |
                          "| GET | `/` | redirect | `src/A.cs` |\n\n## Table of contents\n")
 
 
+class MustMergeNotes(unittest.TestCase):
+    """v1.4.0's devtools/book.py needs the new factory.py and guard.py: a kept older copy is merged first."""
+
+    def test_a_new_book_entry_over_a_kept_factory_or_guard_must_merge_them(self):
+        rows = [(book.NEW, "devtools/book.py"), (book.CONFLICT, "devtools/factory/factory.py"),
+                (book.CONFLICT, "devtools/factory/hooks/guard.py")]
+        text = "\n".join(book.must_merge_notes(rows))
+        self.assertTrue(text.startswith("WRONG "), text)
+        self.assertIn("devtools/factory/factory.py and devtools/factory/hooks/guard.py", text)
+        self.assertIn("merge these before using book", text)
+        guard_only = [(book.NEW, "devtools/book.py"), (book.BEHIND, "devtools/factory/factory.py"),
+                      (book.CONFLICT, "devtools/factory/hooks/guard.py")]
+        self.assertIn("keeps its own devtools/factory/hooks/guard.py (", "\n".join(book.must_merge_notes(guard_only)))
+
+    def test_each_kept_file_gets_its_own_clause_and_no_other(self):
+        def note(factory_status, guard_status):
+            return "\n".join(book.must_merge_notes([(book.NEW, "devtools/book.py"),
+                                                    (factory_status, "devtools/factory/factory.py"),
+                                                    (guard_status, "devtools/factory/hooks/guard.py")]))
+        both = note(book.CONFLICT, book.CONFLICT)
+        self.assertIn("merge these before using book", both)
+        self.assertIn("runs as the old `factory`", both)
+        self.assertIn("the guard judges a deploy only under the name factory.py", both)
+        factory_only = note(book.CONFLICT, book.CURRENT)
+        self.assertIn("merge it before using book", factory_only)
+        self.assertIn("runs as the old `factory`", factory_only)
+        self.assertNotIn("guard", factory_only)
+        guard_only = note(book.CURRENT, book.CONFLICT)
+        self.assertIn("merge it before using book", guard_only)
+        self.assertIn("the guard judges a deploy only under the name factory.py", guard_only)
+        self.assertNotIn("runs as the old", guard_only)
+
+    def test_nothing_to_merge_is_no_note(self):
+        self.assertEqual(book.must_merge_notes([(book.NEW, "devtools/book.py"),
+                                                (book.BEHIND, "devtools/factory/factory.py")]), [])
+        self.assertEqual(book.must_merge_notes([(book.CURRENT, "devtools/book.py"),
+                                                (book.CONFLICT, "devtools/factory/factory.py")]), [])
+
+
+class DeployNotes(unittest.TestCase):
+    """v1.4.0: /book:deploy reads the project's facts from [deploy]; the keys still to fill are a person's to confirm."""
+
+    FILLED = {"ssh_host": "h", "ssh_user": "u", "ssh_key": "~/.ssh/k", "runbook": "docs/plans/deployment.md",
+              "audit_record": "", **{env: {"directory": "/srv", "compose_files": ["c.yaml"], "project": "p",
+                                           "settings_environment": env, "api_port": 8080} for env in ("DEV", "QA")}}
+
+    def notes(self, deploy: dict | None, packs: list[str] = ["deploy"]) -> str:
+        config = {"book": {"packs": packs}, **({"deploy": deploy} if deploy is not None else {})}
+        return "\n".join(book.deploy_notes(config))
+
+    def test_a_filled_table_or_no_deploy_pack_mean_nothing_to_confirm(self):
+        self.assertEqual(self.notes(self.FILLED), "")
+        self.assertEqual(self.notes(None, packs=["fe-guides"]), "")
+
+    def test_the_keys_to_fill_and_the_keys_v140_added_are_named(self):
+        deploy = {key: value for key, value in self.FILLED.items() if key not in ("runbook", "audit_record")}
+        deploy["ssh_host"] = "<the DEV/QA host>"
+        deploy["QA"] = dict(deploy["QA"], api_port=0)
+        text = self.notes(deploy)
+        self.assertTrue(text.startswith("CONFIRM "), text)
+        self.assertIn("[deploy] ssh_host, [deploy.QA] api_port to fill", text)
+        self.assertIn("[deploy] runbook, [deploy] audit_record to add", text)
+        self.assertNotIn("ssh_user", text)
+        self.assertIn("[deploy] ssh_host, [deploy] ssh_user", self.notes({}), "a Book with no [deploy] yet")
+        deep = dict(self.FILLED, ssh_key="~/.ssh/<the deploy key>", tests={"unit": "<the unit test project>"})
+        self.assertIn("[deploy] ssh_key, [deploy.tests] unit to fill", self.notes(deep), "a placeholder anywhere")
+
+
 class FeGuidesNotes(unittest.TestCase):
-    """Unversioned routes in the contracts that nothing owns are for a person to confirm (D36)."""
+    """Unversioned routes in the contracts that nothing owns are for a person to confirm (Book D36)."""
 
     def notes(self, files: dict[str, str], owners: list | None = None) -> str:
         with tempfile.TemporaryDirectory() as folder:
@@ -1288,7 +1406,10 @@ class TheRealTemplate(unittest.TestCase):
                 self.assertIn('id = "data-script-ddl"', config, "every stack keeps the core rule")
                 self.assertEqual('id = "anonymous-route"' in config, stack == "dotnet")
                 self.assertEqual("[dotnet_checks]" in config, stack == "dotnet")
-                # The Book records what it installed, so verify and the pack checks see it (D30).
+                # The deploy pack's table names the project's own variables, and leaves only `<…>` to fill.
+                self.assertEqual('test_db_variable = "ACME_TEST_DB"' in config, "deploy" in packs)
+                self.assertNotIn("{{", config)
+                # The Book records what it installed, so verify and the pack checks see it (Book D30).
                 self.assertEqual(book.installed_packs(tomllib.loads(config)),
                                  ([stack] if stack != "none" else []) + packs)
                 claude = (target / "CLAUDE.md").read_text(encoding="utf-8")

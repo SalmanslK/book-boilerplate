@@ -153,6 +153,35 @@ class TargetTests(unittest.TestCase):
         with self.assertRaisesRegex(deploy.DeployError, "ssh_host"):
             deploy.target(raw, "DEV", "dev")
 
+    def test_a_placeholder_anywhere_in_any_key_this_deploy_reads_stops_it(self):
+        base = CONFIG["deploy"]
+        cases = {
+            "[deploy] ssh_key": dict(base, ssh_key="~/.ssh/<the deploy key>"),
+            "[deploy] protected_probe": dict(base, protected_probe="<a real route>"),
+            "[deploy] migrations": dict(base, migrations="<the migrations folder>"),
+            "[deploy] smoke_credentials": dict(base, smoke_credentials=["APP_EMAIL", "<PREFIX>_PASSWORD"]),
+            "[deploy.tests] unit": dict(base, tests=dict(base["tests"], unit="<the unit test project>")),
+            "[deploy.DEV] directory": dict(base, DEV=dict(base["DEV"], directory="/srv/<the DEV checkout>")),
+        }
+        for key, table in cases.items():
+            with self.subTest(key), self.assertRaises(deploy.DeployError) as caught:
+                deploy.target({"deploy": table}, "DEV", "dev")
+            self.assertIn(key, str(caught.exception))
+        # The other environment's table, and the notes, are not this deploy's.
+        other = dict(base, QA=dict(base["QA"], directory="<the QA checkout>"), notes={"check": "<a note>"})
+        self.assertEqual(deploy.target({"deploy": other}, "DEV", "dev").env, "DEV")
+        self.assertEqual(deploy.unfilled(other, "QA"), ["[deploy.QA] directory"])
+        missing = dict(base, DEV=dict(base["DEV"], api_port=0))
+        self.assertEqual(deploy.unfilled(missing, "DEV"), ["[deploy.DEV] api_port"])
+
+    def test_a_placeholder_is_a_bracketed_answer_not_a_redirect_comparison_or_closing_tag(self):
+        for value in ("<the deploy key>", "<your host>", "~/.ssh/<the key>", "/srv/<the DEV checkout>", "<PREFIX>_EMAIL",
+                      "<…>", "<title>App</title>"):  # an opening HTML tag reads as one: the pack says so
+            self.assertTrue(deploy.PLACEHOLDER.search(value), value)
+        for value in ("cmd < in.txt > out.txt", "a <= b and c >= d", "1<2>3", "</title>", "a < b", "x <> y", "<>",
+                      "~/.ssh/deploy_key"):
+            self.assertIsNone(deploy.PLACEHOLDER.search(value), value)
+
     def test_branch_names_that_could_reach_the_shell_are_refused(self):
         for branch in ["dev; rm -rf /", "$(id)", "../x", "a..b", "-x", "x/", "fix//y", ""]:
             with self.subTest(branch=branch), self.assertRaises(deploy.DeployError):

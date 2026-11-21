@@ -26,7 +26,7 @@ Python 3.11+ and git; nothing else.
 ```
 git init my-project
 # write my-project/book.toml with the answers (the /book:setup skill asks them)
-python devtools/factory/factory.py book init --target my-project
+python devtools/book.py init --target my-project
 ```
 
 **An existing repository (brownfield):** on a `chore/book-setup-<slug>` branch, with `mode = "brownfield"`
@@ -39,7 +39,7 @@ switched on as the last stage.
 "not yet" and leaves a slot to fill. `owners` is a list of tables, one per owner:
 `owners = [{ name = "A Person", account_id = "<their Git host account id>" }]`, or `[]` for none yet.
 
-Then fill the `<!-- FILL -->` slots until `python devtools/factory/factory.py book verify` says **READY**.
+Then fill the `<!-- FILL -->` slots until `python devtools/book.py verify` says **READY**.
 
 ## Upgrade
 
@@ -47,8 +47,8 @@ Init records the template version in the project's `devtools/factory/factory.tom
 From a newer checkout of this repository (its `v<version>` tags rebuild the installed version):
 
 ```
-python devtools/factory/factory.py book upgrade --target my-project            # drift report, read-only
-python devtools/factory/factory.py book upgrade --target my-project --apply    # update what it may
+python devtools/book.py upgrade --target my-project            # drift report, read-only
+python devtools/book.py upgrade --target my-project --apply    # update what it may
 ```
 
 The report says, for every file the template owns, whether the project's copy is current, behind the
@@ -64,7 +64,7 @@ git config core.hooksPath .githooks
 python devtools/checks/run-self-tests.py devtools/factory/hooks
 python devtools/checks/run-self-tests.py devtools/factory
 python devtools/checks/run-self-tests.py devtools/checks
-python devtools/factory/factory.py book verify
+python devtools/book.py verify
 ```
 
 The rules are [CLAUDE.md](CLAUDE.md); the tooling is [devtools/README.md](devtools/README.md).

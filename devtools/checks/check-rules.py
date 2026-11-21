@@ -3,7 +3,7 @@
 Every rule the instruction files mark *[enforced: …]* is still enforced.
 
 A marker names what enforces its rule — a test class, a check script, the guard, the commit-msg
-hook, `factory pr open`. This check confirms that each named thing still exists and still runs
+hook, `book pr open`. This check confirms that each named thing still exists and still runs
 where the marker says: a test class is in the test projects CI runs; a script marked "CI" is in a
 CI file, one marked "pre-commit" is in `.githooks/pre-commit`; the guard is wired into the session
 settings and its tests run in CI.
@@ -194,37 +194,38 @@ def judge(marker: str, classes: set[str], pipelines: str, precommit: str,
                 problems.append(".githooks/commit-msg is not committed executable (mode 100755)")
             else:
                 ran.append("every commit")
-        elif name.startswith("factory pr open"):
+        elif name.startswith(("factory pr open", "book pr open")):  # the command is `book` from v1.4.0
             factory = live(read("devtools/factory/factory.py", root))
             if "ai files" in words:
                 # the marker names the AI files line, which pr open requires when the branch changes one.
                 if "ai_files_touched(root, config" not in factory                         or "AI_FILES.search(" not in live(read("devtools/factory/bitbucket.py", root)):
-                    problems.append("factory pr open no longer checks the description's AI files line")
+                    problems.append("book pr open no longer checks the description's AI files line")
                 else:
-                    ran.append("factory pr open")
+                    ran.append("book pr open")
             elif "description" in words:
                 # the marker names the description check, which pr open runs before the PR exists.
                 if "bitbucket.description_problems(" not in factory \
                         or "EFFORT.search(" not in live(read("devtools/factory/bitbucket.py", root)):
-                    problems.append("factory pr open no longer checks the description's Effort line")
+                    problems.append("book pr open no longer checks the description's Effort line")
                 else:
-                    ran.append("factory pr open")
+                    ran.append("book pr open")
             elif "local ci" in words:
                 # the marker names the local CI pass, not the review.
                 if "def recorded_local_ci" not in factory or "recorded_local_ci(root)" not in factory:
-                    problems.append("factory pr open no longer requires a local CI pass")
+                    problems.append("book pr open no longer requires a local CI pass")
                 else:
-                    ran.append("factory pr open")
+                    ran.append("book pr open")
             elif "def command_reviewed" not in factory or "recorded_review(root)" not in factory:
-                problems.append("factory pr open no longer requires a READY review")
+                problems.append("book pr open no longer requires a READY review")
             else:
-                ran.append("factory pr open")
-        elif name.startswith("factory "):
+                ran.append("book pr open")
+        elif name.startswith(("factory ", "book ")):
             command = name.split()[1]
             if f'add_parser("{command}"' not in live(read("devtools/factory/factory.py", root)):
-                problems.append(f"factory has no {command} command")
-            elif re.search(r"\bCI\b", marker) and f"factory.py {command}" not in live(pipelines):
-                problems.append(f"CI does not run factory {command}")
+                problems.append(f"book has no {command} command")
+            elif re.search(r"\bCI\b", marker) and not any(f"{script} {command}" in live(pipelines)
+                                                          for script in ("factory.py", "book.py")):
+                problems.append(f"CI does not run book {command}")
             else:
                 ran.append("CI" if re.search(r"\bCI\b", marker) else name)
         else:

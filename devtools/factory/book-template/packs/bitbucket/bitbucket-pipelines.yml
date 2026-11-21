@@ -81,7 +81,7 @@ definitions:
           # here as well doubled the step's time and its memory exposure.
           # The integration project also holds the deployed-host smoke tests
           # (Category=Smoke). They skip without their host, which only
-          # /deploy supplies. No Category=S3 test exists; one written later
+          # /book:deploy supplies. No Category=S3 test exists; one written later
           # must skip without its simulator the same way. The run below excludes
           # both, and the skip gate
           # that follows sees only the in-process tests, where a skip is the lie.
@@ -299,7 +299,7 @@ definitions:
           - python3 devtools/checks/check-vulnerable-packages.py vulnerable.json
 
     # Runs the smoke half of the integration project against a DEPLOYED host —
-    # the same tests /deploy runs with `factory deploy smoke`, from our runner instead of
+    # the same tests /book:deploy runs with `book deploy smoke`, from our runner instead of
     # a laptop. Pipelines does not do the deploy (the skill does, over SSH), so
     # this is a CUSTOM pipeline: run it from Bitbucket after a deploy, against
     # DEV or QA. It reaches the public hostname, as a laptop off the LAN would.
@@ -313,7 +313,7 @@ definitions:
     #
     # What each account is and how it is set up: docs/dev-smoke-test-suite.md §4.
     # Only one run may target a host at a time (§3 there) — do not start it
-    # while /deploy's own smoke step is running against the same environment.
+    # while /book:deploy's own smoke step is running against the same environment.
     - step: &smoke-deployed-host
         name: Smoke the deployed host
         runs-on:
@@ -530,7 +530,7 @@ definitions:
           # token with Repositories and Pull requests: Read, never printed. The branch
           # rules are not checked here: reading them needs Repositories: Admin, which can
           # also change them, and a secured variable reaches every branch's pipelines. A
-          # person runs `factory protection --check` with their own credential.
+          # person runs `book protection --check` with their own credential.
           - apk add --no-cache git curl
           - '[ -n "$BITBUCKET_TOKEN" ] || { echo "Set the secured variable BITBUCKET_TOKEN first."; exit 1; }'
           - 'PR_NUMBER=$(echo "$PR_NUMBER" | tr -d " "); [ -n "$PR_NUMBER" ] || { echo "Give PR_NUMBER: the pull request to check."; exit 1; }'

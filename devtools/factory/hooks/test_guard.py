@@ -281,7 +281,7 @@ class ShellTests(unittest.TestCase):
          {("deploy-non-dev", guard.DENY)}),
         ("a production compose file", "docker compose -f compose.yaml -f compose.production.yaml up -d", {("deploy-non-dev", guard.DENY)}),
         ("the QA project over ssh", "ssh deploy@deploy-host.example 'cd /srv/app-qa && docker compose -p app-qa ps'", set()),
-        ("the health check /deploy runs", "ssh deploy@deploy-host.example 'curl -fsS http://localhost:8080/health/live'", set()),
+        ("the health check /book:deploy runs", "ssh deploy@deploy-host.example 'curl -fsS http://localhost:8080/health/live'", set()),
         # factory deploy runs its ssh inside its own process: the environment it is given is judged instead.
         ("factory deploy to QA", "python devtools/factory/factory.py deploy check --env QA --pre-tests run --post-tests run", set()),
         ("factory deploy with no env is DEV", "python3 devtools/factory/factory.py deploy up", set()),
@@ -303,6 +303,33 @@ class ShellTests(unittest.TestCase):
         ("factory deploy with an abbreviated --env", "python devtools/factory/factory.py deploy check --en UAT",
          {("deploy-non-dev", guard.DENY)}),
         ("a factory command that is not deploy", "python devtools/factory/factory.py jira PROJ-1 --env UAT", set()),
+        # The same command under its v1.4.0 name, devtools/book.py, is judged the same way.
+        ("book deploy to QA", "python devtools/book.py deploy check --env QA --pre-tests run --post-tests run", set()),
+        ("book deploy with no env is DEV", "python3 devtools/book.py deploy up", set()),
+        ("book deploy to UAT", "python devtools/book.py deploy check --env UAT", {("deploy-non-dev", guard.DENY)}),
+        ("book deploy to production, Windows path", "py devtools\\book.py deploy check --env=production",
+         {("deploy-non-dev", guard.DENY)}),
+        ("book deploy status for UAT", "python devtools/book.py deploy status --target uat", {("deploy-non-dev", guard.DENY)}),
+        ("factory deploy to production, Windows path", "py devtools\\factory\\factory.py deploy check --env=UAT",
+         {("deploy-non-dev", guard.DENY)}),
+        ("a book command that is not deploy", "python devtools/book.py jira PROJ-1 --env UAT", set()),
+        # The script is matched as its own path segment: another script whose name ends the same is no deploy.
+        ("a notebook script's own deploy step", "python tools/notebook.py deploy --env UAT", set()),
+        ("a script named like the factory", "python tools/myfactory.py deploy --env production", set()),
+        ("book deploy run from its own folder", "python book.py deploy check --env UAT", {("deploy-non-dev", guard.DENY)}),
+        ("factory deploy, a quoted Windows path", 'py "devtools\\factory\\factory.py" deploy check --env=UAT',
+         {("deploy-non-dev", guard.DENY)}),
+        # Run as a module, under either name, from the root or the package.
+        ("book deploy as a module", "python -m book deploy check --env UAT", {("deploy-non-dev", guard.DENY)}),
+        ("factory deploy as a module", "python3 -m factory deploy up --env production", {("deploy-non-dev", guard.DENY)}),
+        ("book deploy as devtools.book", "py -m devtools.book deploy check --env=UAT", {("deploy-non-dev", guard.DENY)}),
+        ("factory deploy as its package path", "python -m devtools.factory.factory deploy status --target uat",
+         {("deploy-non-dev", guard.DENY)}),
+        ("book deploy, -m joined", "python -mbook deploy check --env UAT", {("deploy-non-dev", guard.DENY)}),
+        ("book deploy as a module to QA", "python -m devtools.book deploy check --env QA", set()),
+        ("another module's deploy step", "python -m notebook deploy --env UAT", set()),
+        ("another module, the word book after it", "python -m tools.report book deploy --env UAT", set()),
+        ("a script given the word book", "python tools/run.py book deploy --env UAT", set()),
         ("a work branch's PR through the tool, the token never in the shell",
          "python3 devtools/factory/factory.py pr open --title x --body-file body.md", set()),
         ("reading a Jira issue through the tool", "python3 devtools/factory/factory.py jira PROJ-376", set()),
@@ -930,7 +957,7 @@ class GitUnavailableTests(unittest.TestCase):
 
 
 class IdentityFileTests(unittest.TestCase):
-    """Handing ssh a key file is not reading it: /deploy's own command passes."""
+    """Handing ssh a key file is not reading it: /book:deploy's own command passes."""
 
     def test_a_key_handed_to_ssh_passes(self):
         for command in ("ssh -i ~/.ssh/id_ed25519_app_dev deploy@deploy-host.example 'docker compose -p app-dev ps'",
@@ -2230,7 +2257,7 @@ class DateVariableTests(unittest.TestCase):
 
 
 class DriveTests(unittest.TestCase):
-    """H4: the FE guides reach Drive only through /publish-guides's rclone script, which never deletes a Doc."""
+    """H4: the FE guides reach Drive only through /book:publish-guides's rclone script, which never deletes a Doc."""
 
     DRIVE = ("drive-write", guard.DENY)
 

@@ -18,4 +18,4 @@ page is the reading order.
 How to write any of them: [`CLAUDE.md`](CLAUDE.md) in this folder.
 
 A skill name from before v1.3.0 (`/requirements-check`, `/review-branch` and the rest): its new name is
-in [the AI guide](../AI-DEVELOPMENT-GUIDE.md#the-names-before-v130).
+in [the AI guide](../AI-DEVELOPMENT-GUIDE.md#old-names).

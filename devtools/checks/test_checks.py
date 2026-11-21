@@ -793,15 +793,15 @@ class HooksWithoutPythonTests(RepoTestCase):
         self.assertTrue(any(call.startswith("-3 ") and call.endswith("/devtools/checks/check-private-data.py --staged")
                             for call in calls), calls)
         # The AI files a commit changes are named, however they were written.
-        self.assertTrue(any(call.startswith("-3 ") and call.endswith("/devtools/factory/factory.py ai-files --staged")
+        self.assertTrue(any(call.startswith("-3 ") and call.endswith("/devtools/book.py ai-files --staged")
                             for call in calls), calls)
 
     def test_pre_commit_notes_but_does_not_refuse_when_the_ai_files_note_cannot_run(self):
-        # Every Python runs, but factory.py fails (an older Python without tomllib, say): the note is a
+        # Every Python runs, but the book command fails (an older Python without tomllib, say): the note is a
         # note, and the owner's approval on the pull request stays the gate.
         for name in ("python3", "python"):
             stub = self.bin / name
-            stub.write_text('#!/bin/sh\ncase "$*" in *factory.py*) exit 1 ;; esac\nexit 0\n',
+            stub.write_text('#!/bin/sh\ncase "$*" in */devtools/book.py*) exit 1 ;; esac\nexit 0\n',
                             encoding="utf-8", newline="\n")
             stub.chmod(0o755)
         env = {**os.environ, "PATH": str(self.bin) + os.pathsep + os.environ.get("PATH", "")}
@@ -1387,10 +1387,22 @@ class RulesJudgeTests(RepoTestCase):
         self.repo.write("devtools/factory/factory.py", reviewed_only)
         self.assertEqual(self.judge(": `factory pr open`")[2], [])
         self.assertEqual(self.judge(": `factory pr open`, local CI")[2],
-                         ["factory pr open no longer requires a local CI pass"])
+                         ["book pr open no longer requires a local CI pass"])
         self.repo.write("devtools/factory/factory.py", reviewed_only +
                         "def recorded_local_ci(root): ...\n    result, at = recorded_local_ci(root)\n")
         self.assertEqual(self.judge(": `factory pr open`, local CI")[2], [])
+        # From v1.4.0 the command is `book`; a Book's markers may name either until the old name goes.
+        self.assertEqual(self.judge(": `book pr open`, local CI")[2], [])
+
+    def test_a_book_command_marker_is_judged_under_either_name(self):
+        self.repo.write("devtools/factory/factory.py", 'sub.add_parser("impact")\n')
+        self.assertEqual(self.judge(": `book impact`")[2], [])
+        self.assertEqual(self.judge(": `factory impact`")[2], [])
+        self.assertEqual(self.judge(": `book gone`")[2], ["book has no gone command"])
+        self.assertEqual(self.judge(": `book impact`, CI")[2], ["CI does not run book impact"])
+        for script in ("devtools/factory/factory.py", "devtools/book.py"):
+            self.assertEqual(self.judge(": `book impact`, CI", f"      - python3 {script} impact --ci\n")[2], [],
+                             script)
 
     def test_a_deleted_script_is_broken(self):
         self.assertIn("check-gone.py is gone", self.judge(": `check-gone.py`, CI")[2])

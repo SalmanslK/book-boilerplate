@@ -1,6 +1,6 @@
 ---
 name: review-pr
-description: Renamed to /book:peer-review, in the book plugin. This old name is removed in v1.4.
+description: Renamed to /book:peer-review, in the book plugin. This old name is removed in v1.5.
 disable-model-invocation: true
 ---
 

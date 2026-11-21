@@ -2147,5 +2147,126 @@ class SnapshotsTests(unittest.TestCase):
         self.assertEqual(snapshots.last_checked("no line"), ("", ""))
 
 
+class BookCommandTests(unittest.TestCase):
+    """devtools/book.py: the command under its v1.4.0 name, forwarding to factory.py, which still works."""
+
+    ENTRY = HERE.parent / "book.py"
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("book_entry", cls.ENTRY)
+        cls.entry = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.entry)
+
+    def test_the_books_own_steps_need_no_second_book(self):
+        for step in ("verify", "init", "upgrade"):
+            self.assertEqual(self.entry.arguments([step, "--target", "x"]), ["book", step, "--target", "x"])
+        self.assertEqual(self.entry.arguments(["book", "verify"]), ["book", "verify"])
+        self.assertEqual(self.entry.arguments(["pr", "open"]), ["pr", "open"])
+        self.assertEqual(self.entry.arguments([]), [])
+
+    def test_it_runs_the_same_command_under_its_own_name(self):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            self.entry.main(["no-such-command"])
+        self.assertIn("book: error", err.getvalue())
+        done = subprocess.run([sys.executable, str(self.ENTRY), "config", "book_version"], capture_output=True,
+                              text=True, encoding="utf-8")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.strip(), str(factory.load_config(HERE.parents[1]).raw.get("book_version")))
+
+    def test_a_factory_py_kept_from_before_v140_runs_under_its_old_name_and_says_what_to_merge(self):
+        calls = []
+
+        def old_main(argv):  # 1.3.x's main(), which names no command
+            calls.append(argv)
+            return 0
+
+        err = io.StringIO()
+        with mock.patch.object(self.entry, "factory", mock.Mock(main=old_main)), contextlib.redirect_stderr(err):
+            self.assertEqual(self.entry.main(["verify"]), 0)
+        self.assertEqual(calls, [["book", "verify"]])
+        self.assertIn("devtools/factory/factory.py predates Book v1.4.0", err.getvalue())
+        self.assertTrue(self.entry.names_itself(), "this repository's own factory.py names the command")
+
+    def test_the_old_name_tells_only_a_person_at_a_terminal(self):
+        done = subprocess.run([sys.executable, str(HERE / "factory.py"), "config", "book_version"],
+                              capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn("the command is `book` now", done.stderr)  # piped, as the hooks and CI run it
+        self.assertIn("python devtools/book.py", factory.RENAME_NOTE)
+
+
+class ShippedTextTests(unittest.TestCase):
+    """
+    What `book init` and `book upgrade` copy into a project cites the Book template's own defects as `Book D39`: the
+    project's docs/defects.md numbers its own from `D1`, so a bare `D39` there names some other defect of theirs.
+    Read: the comments and docstrings of a shipped .py file, the comments of a .toml one, the text of the rest;
+    an id in backticks or quotes is an example or fixture data, not a citation.
+    """
+
+    ID = re.compile(r"(?<![\w-])(?<!Book )D\d+\b")
+    QUOTED = re.compile(r"`[^`]*`|\"[^\"\n]*\"|'[^'\n]*'")
+
+    @staticmethod
+    def python_text(source: str) -> list[tuple[int, str]]:
+        import tokenize
+        found, previous = [], tokenize.NEWLINE
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            if token.type == tokenize.COMMENT:
+                found.append((token.start[0], token.string))
+            elif token.type == tokenize.STRING and previous in (tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT,
+                                                                tokenize.NL):
+                body = token.string.lstrip("rRbBuU")
+                quote = body[:3] if body[:3] in ('"""', "'''") else body[:1]
+                body = body[len(quote):len(body) - len(quote)]  # the docstring's text, not its own quotes
+                found += [(token.start[0] + n, line) for n, line in enumerate(body.splitlines())]
+            if token.type not in (tokenize.COMMENT, tokenize.NL):
+                previous = token.type
+        return found
+
+    def cited(self, rel: str, text: str) -> list[str]:
+        if rel.endswith(".py"):
+            lines = self.python_text(text)
+        elif rel.endswith(".toml"):
+            lines = [(n, line.split("#", 1)[1]) for n, line in enumerate(text.splitlines(), 1) if "#" in line]
+        else:
+            lines = list(enumerate(text.splitlines(), 1))
+        return [f"{rel}:{n}: {line.strip()[:100]}" for n, line in lines if self.ID.search(self.QUOTED.sub("", line))]
+
+    def shipped(self) -> list[str]:
+        import fnmatch
+        import tomllib
+        root = HERE.parents[1]
+        manifest = tomllib.loads((HERE / "book-template" / "manifest.toml").read_text(encoding="utf-8"))
+        tracked = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, text=True,
+                                 encoding="utf-8").stdout.split("\0")
+        # `dir/**/*` holds dir's own files too, as the copy reads it.
+        patterns = [p for pattern in manifest["copy"]["book"] for p in (pattern, pattern.replace("**/", ""))]
+        return [rel for rel in tracked if rel and any(fnmatch.fnmatch(rel, pattern) for pattern in patterns)]
+
+    def test_a_shipped_file_cites_the_books_own_defects_as_book_ids(self):
+        root = HERE.parents[1]
+        files = self.shipped()
+        self.assertIn("devtools/factory/book.py", files)
+        self.assertIn("devtools/factory/book-template/manifest.toml", files)
+        bare = []
+        for rel in files:
+            try:
+                text = (root / rel).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue  # a binary file cites nothing
+            bare += self.cited(rel, text)
+        self.assertEqual(bare, [], "write `Book D<n>`: a project's own D<n> is another defect")
+
+    def test_the_rule_reads_comments_and_docstrings_not_fixtures(self):
+        source = ('"""Fixed in v1 (D3)."""\nX = "Fix the login (D12)"  # the pin (Book D39)\n# a bare one (D7)\n'
+                  'def f():\n    """`D21` is an example."""\n')
+        self.assertEqual([int(line.split(":")[1]) for line in self.cited("x.py", source)], [1, 3])
+        self.assertEqual(len(self.cited("x.toml", 'a = "D4"  # names it (D39)\n')), 1)
+        self.assertEqual(self.cited("x.md", "See `D7` and Book D39.\n"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

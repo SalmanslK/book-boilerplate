@@ -37,17 +37,19 @@ Documentation skills differ by **what they compare**:
 | `/book:upgrade` | the Book ↔ a newer template | Reports, applies on approval |
 | `/book:flow` | which skills a situation needs, in order ← its recipe | Lists the 18 recipes, or walks one; stops at each approval |
 
-### The names before v1.3.0
+### Old names
 
 v1.3.0 moved the Book's own skills and agents into the **book plugin** (each called `/book:<name>`) and
-renamed some. An old name still in a doc, a chat or a habit means the new one here. For v1.3.x a stub
-under each old name says the same and does nothing else.
+renamed some; v1.4.0 moved the packs' skills there too, and named the Book's command `book`
+(`python devtools/book.py <command>`; `devtools/factory/factory.py` still works). An old name still in a
+doc, a chat or a habit means the new one here. Until v1.5 a stub under each old skill name this project had
+says the same and does nothing else.
 
 The plugin is pinned to a release tag (`ref` in `.claude/settings.json`'s `extraKnownMarketplaces`), so a
 new plugin release reaches the project only through a reviewed change: take one by moving `ref` in a pull
-request. `factory book verify` refuses an unpinned plugin or one older than the template needs.
+request. `book verify` refuses an unpinned plugin or one older than the template needs.
 
-| Before v1.3.0 | Now |
+| Before | Now |
 |---|---|
 | `/requirements-check` | `/book:check-sources` |
 | `/requirements-sync` | `/book:sync-sources` |
@@ -63,9 +65,11 @@ request. `factory book verify` refuses an unpinned plugin or one older than the 
 | `/docs-consistency` | `/book:check-consistency` |
 | `/docs-trim` | `/book:trim` |
 | `/book-setup`, `/plan-feature`, `/book-upgrade` | `/book:setup`, `/book:plan`, `/book:upgrade` |
-| agents `book-reviewer`, `book-tester` | agents `book:reviewer`, `book:tester` |
-| `/deploy-dev-qa` (deploy pack) | `/deploy` |
-| `/fe-guides-publish`, `/fe-guides-check` (fe-guides pack) | `/publish-guides`, `/check-guides` |
+| agents `book-reviewer`, `book-tester` | agents `book:reviewer`, `book:tester` (they became the plugin's `reviewer` and `tester`, with no stub: the upgrade stubs skills only) |
+| `/deploy-dev-qa`, and `/deploy` before v1.4.0 (deploy pack) | `/book:deploy` |
+| `/fe-guides-publish`, `/fe-guides-check`, and `/publish-guides`, `/check-guides` before v1.4.0 (fe-guides pack) | `/book:publish-guides`, `/book:check-guides` |
+| `/release-notes` before v1.4.0 (fe-guides pack) | `/book:release-notes` |
+| `factory <command>` (`python devtools/factory/factory.py`), before v1.4.0 | `book <command>` (`python devtools/book.py`) |
 
 ## Agents
 

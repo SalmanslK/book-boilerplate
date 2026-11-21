@@ -9,10 +9,10 @@
 # Stack-free: the build and test commands are `[commands]` in factory.toml (build, test, integration),
 # and an empty command is reported N/A, never OK. A pack's own checks run where the pack installed
 # them (each guarded by `[ -f ]`). How much runs follows what the branch changed against the base
-# (`base_ref`): `factory impact --ci` names the tier - checks, build, modules or full.
+# (`base_ref`): `book impact --ci` names the tier - checks, build, modules or full.
 #
 # Stops at the first failure. On a pass over a clean tree it records PASS for the commit, with its tier,
-# inside .git, where `factory pr open` looks for it, and prints a "Local CI" section to paste into the
+# inside .git, where `book pr open` looks for it, and prints a "Local CI" section to paste into the
 # pull request. A pass over uncommitted work, or one during which HEAD moved, records nothing and exits 3.
 set -eu
 
@@ -58,7 +58,7 @@ for candidate in python3 python "py -3"; do
 done
 [ -n "$py" ] || fail "no working Python (python3, python or py -3)"
 setting() { # setting <table.key>: one value from factory.toml, empty when absent
-    $py devtools/factory/factory.py config "$1" 2>/dev/null || true
+    $py devtools/book.py config "$1" 2>/dev/null || true
 }
 base="$(setting base_ref)"
 [ -n "$base" ] || base="origin/main"
@@ -85,7 +85,7 @@ set -- $previous
 if [ -z "$full" ] && [ "${1:-}" = PASS ] && [ -n "${2:-}" ] && [ "$2" != "$commit" ] && [ -s "$counts" ] \
    && git merge-base --is-ancestor "$2" "$commit" 2>/dev/null; then
     delta="$(git diff --name-only "$2" "$commit")"
-    if [ -n "$delta" ] && $py devtools/factory/factory.py impact --ci $delta | grep -qx 'tier=checks'; then
+    if [ -n "$delta" ] && $py devtools/book.py impact --ci $delta | grep -qx 'tier=checks'; then
         carried="$2"
         tier="${4:-full}"
         reason="carried from ${carried%"${carried#????????????}"}: only checks-tier files changed since"
@@ -93,7 +93,7 @@ if [ -z "$full" ] && [ "${1:-}" = PASS ] && [ -n "${2:-}" ] && [ "$2" != "$commi
 fi
 set +f
 if [ -z "$carried" ]; then
-    tiering="$($py devtools/factory/factory.py impact --ci)" || fail "factory impact --ci"
+    tiering="$($py devtools/book.py impact --ci)" || fail "book impact --ci"
     tier="$(printf '%s\n' "$tiering" | sed -n 's/^tier=//p')"
     filter="$(printf '%s\n' "$tiering" | sed -n 's/^filter=//p')"
     reason="$(printf '%s\n' "$tiering" | sed -n 's/^reason=//p')"
@@ -101,7 +101,7 @@ if [ -z "$carried" ]; then
 fi
 case "$tier" in
     checks|build|modules|full) ;;
-    *) fail "factory impact --ci named no tier (got '$tier')" ;;
+    *) fail "book impact --ci named no tier (got '$tier')" ;;
 esac
 echo "Tier: $tier ($reason)"
 echo "Tier: $tier ($reason)" >> "$summary"
@@ -154,9 +154,9 @@ if [ -f devtools/checks/check-compose.py ]; then
     $py devtools/checks/check-compose.py || fail "check-compose.py"
 fi
 echo "Repository checks: passed" >> "$summary"
-# Which files that steer the AI the branch changed: `factory pr open` refuses a description without
+# Which files that steer the AI the branch changed: `book pr open` refuses a description without
 # this line when there are any, so an owner's approval is asked for before the merge.
-ai_line="$($py devtools/factory/factory.py ai-files --list)" || fail "factory ai-files --list ($ai_line)"
+ai_line="$($py devtools/book.py ai-files --list)" || fail "book ai-files --list ($ai_line)"
 echo "$ai_line" >> "$summary"
 
 # The Book's own self-tests: devtools/checks/run-self-tests.py over each [commands] self_tests folder,

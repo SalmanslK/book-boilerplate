@@ -252,7 +252,7 @@ class FeGuidesTests(RepoTestCase):
 
 
     def wrapped(self, checked: str, body: str) -> str:
-        """A guide whose header wraps inside the field, as an editor's line length leaves it (D28)."""
+        """A guide whose header wraps inside the field, as an editor's line length leaves it (Book D28)."""
         return ("# Companies and Locations — front-end integration guide\n\n**Module:** x · **Base:** "
                 "`/api/v1/companies` · **Last checked against\nthe code:** " + checked + f"\n\n{body}\n")
 

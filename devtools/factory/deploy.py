@@ -1,5 +1,5 @@
 """
-factory deploy — the mechanical half of /deploy: every probe, gate, count and verdict the
+factory deploy — the mechanical half of /book:deploy: every probe, gate, count and verdict the
 skill used to spell out as shell, run the same way every time and tested. The skill keeps the
 decisions: what to ask, when to stop, keep or revert.
 
@@ -45,7 +45,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ENVIRONMENTS = ("DEV", "QA")
-REFUSED_TARGET = "Refused — /deploy targets DEV and QA only. {value} is not a permitted target."
+REFUSED_TARGET = "Refused — /book:deploy targets DEV and QA only. {value} is not a permitted target."
 REFUSED_QA_SKIP = "Refused — QA always runs the pre-deploy tests. Use --pre-tests run, or deploy to DEV."
 # A branch name goes into a remote shell script (quoted as well); refuse anything git would not call a
 # plain branch name rather than trust the quoting alone.
@@ -140,20 +140,69 @@ def environment(value: str) -> str:
     return name
 
 
+# A value still to fill, anywhere in it: the deploy pack's skeleton writes `<the DEV/QA host>`, `~/.ssh/<the key>`.
+# Not a shell redirect (`< in.txt > out.txt`), a comparison (`a <= b`, `1<2>3`) or a closing tag; an opening HTML
+# tag (`<title>`) still reads as one, so a [deploy] value holds no `<…>` of its own (the pack's comment says so).
+PLACEHOLDER = re.compile(r"<[^<>=\s/\d][^<>]*>")
+NEEDED = ("ssh_host", "ssh_user", "ssh_key")
+TARGET_NEEDED = ("directory", "compose_files", "project", "settings_environment", "api_port")
+# The other environment's table is not this deploy's; the compose and notes tables are read, never run.
+NOT_SCANNED = {*ENVIRONMENTS, "compose", "notes"}
+# The steps /book:deploy reads a `[deploy.notes]` entry with: a key that names none is never read.
+NOTE_STEPS = ("check", "gate", "changes", "up", "smoke", "revert", "report")
+
+
+def placeholders(deploy: dict, env: str) -> list[str]:
+    """
+    Every value of [deploy] (the shared keys and [deploy.tests]) and [deploy.<env>] that still holds a `<…>`
+    placeholder, named as `[table] key`: a deploy never runs one, since a host or a probe it guessed is worse
+    than none.
+    """
+    found: list[str] = []
+
+    def walk(section: str, key: str, value) -> None:
+        if isinstance(value, str):
+            if PLACEHOLDER.search(value) and f"{section} {key}" not in found:
+                found.append(f"{section} {key}")
+        elif isinstance(value, list):
+            for item in value:
+                walk(section, key, item)
+        elif isinstance(value, dict):
+            for inner in value.values():
+                walk(section, key, inner)
+
+    for key, value in deploy.items():
+        if key in NOT_SCANNED:
+            continue
+        if key == "tests" and isinstance(value, dict):
+            for name, path in value.items():
+                walk("[deploy.tests]", name, path)
+        else:
+            walk("[deploy]", key, value)
+    for key, value in (deploy.get(env) or {}).items():
+        walk(f"[deploy.{env}]", key, value)
+    return found
+
+
+def unfilled(deploy: dict, env: str) -> list[str]:
+    """What a deploy to env still needs filled: the keys it cannot run without, then every placeholder."""
+    table = deploy.get(env) or {}
+    missing = [f"[deploy] {key}" for key in NEEDED if not deploy.get(key)]
+    missing += [f"[deploy.{env}] {key}" for key in TARGET_NEEDED if not table.get(key)]
+    return missing + [key for key in placeholders(deploy, env) if key not in missing]
+
+
 def target(config_raw: dict, env: str, branch: str) -> Target:
     env = environment(env)
     if not BRANCH.match(branch or ""):
         raise DeployError(f"{branch!r} is not a branch name this tool deploys.")
     deploy = config_raw.get("deploy") or {}
     table = deploy.get(env) or {}
-    needed = {"ssh_host": deploy, "ssh_user": deploy, "ssh_key": deploy, "directory": table,
-              "compose_files": table, "project": table, "settings_environment": table, "api_port": table}
-    for key, source in needed.items():
-        value = source.get(key)
-        if not value or (isinstance(value, str) and value.startswith("<")):
-            # Never guess a host: a missing or placeholder value stops the deploy and says which.
-            section = "[deploy]" if source is deploy else f"[deploy.{env}]"
-            raise DeployError(f"factory.toml {section} has no {key} yet — fill it in before the first deploy.")
+    # Never guess a host: a missing or placeholder value stops the deploy and says which.
+    todo = unfilled(deploy, env)
+    if todo:
+        them = "it" if len(todo) == 1 else "them"
+        raise DeployError(f"factory.toml {', '.join(todo)}: not filled in yet — fill {them} in before the first deploy.")
     return Target(env=env, branch=branch, host=deploy["ssh_host"], user=deploy["ssh_user"],
                   key=os.path.expanduser(deploy["ssh_key"]), directory=table["directory"],
                   compose_files=tuple(table["compose_files"]), profile=table.get("profile", ""),
@@ -1159,7 +1208,7 @@ COMMANDS = {"check": command_check, "gate": command_gate, "changes": command_cha
 
 def add_parser(sub) -> None:
     deploy = sub.add_parser("deploy", allow_abbrev=False,
-                            help="/deploy's steps, DEV and QA only — check, gate, changes, up, smoke, revert, "
+                            help="/book:deploy's steps, DEV and QA only — check, gate, changes, up, smoke, revert, "
                                  "report — and status, read-only")
     deploy.add_argument("step", choices=list(COMMANDS))
     deploy.add_argument("--env", default="DEV", help="check: DEV or QA — nothing else is accepted")

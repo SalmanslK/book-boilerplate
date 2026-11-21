@@ -2,7 +2,7 @@
 
 The **Book** as a starting point: the documents that say what a project builds, why, how and what is
 done, the checks that keep them true, the skills Claude Code works by, and the guard that refuses what
-these rules say never to do. A project copies it (`factory book init`) and fills it in. This
+these rules say never to do. A project copies it (`book init`) and fills it in. This
 repository is its own first Book: its product is the boilerplate, its only code is the Python tooling
 in `devtools/`, and its stack is `none`.
 
@@ -20,7 +20,7 @@ the one for where you are before changing anything there:**
 | `tests/` | [`tests/CLAUDE.md`](tests/CLAUDE.md) — what the tooling's self-tests must prove, and how to run them |
 
 A stack pack adds its own (the dotnet pack: `src/CLAUDE.md` and one per project folder); they live under
-`devtools/factory/book-template/packs/` until `factory book init` copies them, and are not rules here.
+`devtools/factory/book-template/packs/` until `book init` copies them, and are not rules here.
 
 *[enforced: X]* marks a rule a test or check fails the build on; it is written here so you do not trip
 it, not because anyone has to police it. The table of every one, and whether it is intact:
@@ -55,7 +55,7 @@ Never carry on with what you could not read, and never report a check you could 
 | `docs/` | The documentation — owners in [Where knowledge lives](#where-knowledge-lives); closed history in `docs/archive/`. |
 | `requirements/` | **Read-only.** The boilerplate's own specification as snapshots: `fsd/` holds every revision as `- V<n>.md` — **build from the highest number** (a lexical sort puts V9 above V15). The index is `requirements/read-me.txt`. Only `/book:check-sources` adds to it *[enforced: `check-protected-paths.py`, pre-commit]*. |
 | `devtools/checks/` | The checks the hooks and the local CI run, and their self-tests. |
-| `devtools/factory/` | The Book CLI (`factory.py`), the guard (`hooks/`), and the template `factory book init` copies (`book-template/`, with the stack and host packs). |
+| `devtools/factory/` | The Book CLI (`factory.py`, run as `python devtools/book.py <command>`), the guard (`hooks/`), and the template `book init` copies (`book-template/`, with the stack and host packs). |
 | `.claude/` | The skills, the two Book agents, and the hook settings. |
 | `tests/` | Only [`tests/CLAUDE.md`](tests/CLAUDE.md): the self-tests sit beside the code they test. |
 
@@ -141,7 +141,7 @@ Four hold wherever you work:
 - **The tooling is Python 3.11+, standard library only**, so a Book needs nothing installed but Python
   and git.
 - **A tool reads the project from `devtools/factory/factory.toml`, never from a name in its code**: a
-  project name, path or key written into a script is a leftover `factory book verify` reports.
+  project name, path or key written into a script is a leftover `book verify` reports.
 
 ## Private settings
 
@@ -156,7 +156,7 @@ someone's home folder, no person's email or machine name *[enforced: the guard o
   that dumps one, or a secret variable *[enforced: guard]*. Check that a secret is set with `test -n`;
   never print it.
 - **A session reaches a service through a tool that holds the credential, never with it**: Bitbucket
-  through `factory pr`, Jira through `factory jira`, read only.
+  through `book pr`, Jira through `book jira`, read only.
 
 ## Building and testing
 
@@ -164,7 +164,7 @@ someone's home folder, no person's email or machine name *[enforced: the guard o
   `python devtools/checks/run-self-tests.py <folder>` for `devtools/factory/hooks`, `devtools/factory`
   and `devtools/checks` ([how](tests/CLAUDE.md)). A change to the guard or a shared check runs all three.
 - **Before a pull request, run `sh devtools/checks/ci-local.sh`** on the commit and paste the *Local CI*
-  section it prints into the description *[enforced: `factory pr open`, local CI]*. It runs the
+  section it prints into the description *[enforced: `book pr open`, local CI]*. It runs the
   repository checks, the self-tests, and `[commands]` from `factory.toml` (an empty command is N/A).
 - **Report what ran** — the folder, and the executed, passed and skipped counts. A suite that finds no
   tests, or skips one, fails.
@@ -178,13 +178,13 @@ someone's home folder, no person's email or machine name *[enforced: the guard o
   ids go in commit messages.
 - **A change to the files that steer the AI** — the `CLAUDE.md` files, `.claude/`, the AI tools, the
   guard, the checks, the hooks — **is made or approved by an owner** (`[ai_files]` in
-  `devtools/factory/factory.toml`) *[enforced: `factory ai-files`]*. Its pull request names them on an
+  `devtools/factory/factory.toml`) *[enforced: `book ai-files`]*. Its pull request names them on an
   *AI files* line, which the local CI run prints, so the approval is asked for before the merge
-  *[enforced: `factory pr open` checks the description's AI files line]*.
-- Run `/book:self-review` before opening a PR. `factory pr open` refuses a commit without a recorded READY
+  *[enforced: `book pr open` checks the description's AI files line]*.
+- Run `/book:self-review` before opening a PR. `book pr open` refuses a commit without a recorded READY
   verdict.
 - **A PR description has a summary, a test plan, a *Local CI* section and one Effort line** *[enforced:
-  `factory pr open` checks the description before it opens the PR; `factory pr-check` reads it back]*.
+  `book pr open` checks the description before it opens the PR; `book pr-check` reads it back]*.
 - Commit messages are imperative, with no AI or tooling attribution and no trailer lines *[enforced:
   `commit-msg` hook]*.
 

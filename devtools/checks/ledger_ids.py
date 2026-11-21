@@ -1,7 +1,8 @@
 """
 The status of every question (Q<n>) and defect (D<n>), read from their ledgers, and the words a line uses
 about one. One reader, imported by every tool that judges a citation: `/book:sync-sources`'s
-`id_status.py` and `/check-guides`'s `guides_check.py`. A copy in each would drift.
+`id_status.py` and `/book:check-guides`'s `guides_check.py`, both in the book plugin and loading this file
+from the project they check. A copy in each would drift.
 
 The ledgers, as docs/CLAUDE.md writes them:
 

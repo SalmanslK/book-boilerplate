@@ -1,6 +1,6 @@
 ---
 name: docs-trim
-description: Renamed to /book:trim, in the book plugin. This old name is removed in v1.4.
+description: Renamed to /book:trim, in the book plugin. This old name is removed in v1.5.
 disable-model-invocation: true
 ---
 

@@ -246,8 +246,8 @@ def found_by_problems(root: Path = ROOT) -> list[str]:
 # the archive. id_status.py, run by /book:sync-sources, reports the statuses; this holds the duplicates.
 DEFECTS, DEFECTS_ARCHIVE = "docs/defects.md", "docs/archive/defects-closed.md"
 QUESTIONS, QUESTIONS_ARCHIVE = "docs/open-questions.md", "docs/archive/questions-resolved.md"
-DEFECT_ROW = re.compile(r"^\|\s*(?:\*\*)?(D\d+)(?:\*\*)?\s*\|")  # | D21 | 🟠 | …, the id plain or in bold
-DEFECT_FIXED_ENTRY = re.compile(r"^- \*\*(D\d+)\*\* [—·-]")      # - **D21** — what it was …
+DEFECT_ROW = re.compile(r"^\|\s*(?:\*\*)?(D\d+)(?:\*\*)?\s*\|")  # `| D21 | 🟠 | …`, the id plain or in bold
+DEFECT_FIXED_ENTRY = re.compile(r"^- \*\*(D\d+)\*\* [—·-]")      # `- **D21** — what it was …`
 QUESTION_SECTION = re.compile(r"^#### (Q\d+) [—·]")               # #### Q59 — May …
 QUESTION_ARCHIVED = re.compile(r"^#{2}(?:##)? (Q\d+) [—·]")       # ## or #### Q59 — May … (the archive)
 QUESTION_SUMMARY_ROW = re.compile(r"^\| (?:⛔ )?\[(Q\d+)\]\(")    # | [Q122](#q122--…) | … (Still open's tables)

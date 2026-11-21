@@ -1,9 +1,9 @@
 # The AI tools' configuration for this repository: what the guard refuses or asks about in every Claude
 # Code session, who owns the files that steer the AI, where Jira is, and what the branch restrictions
 # must be. Read by factory.py and by hooks/guard.py. A person confirms every change to this file.
-# Written by `factory book init`; every <!-- FILL --> is an answer still to give.
+# Written by `book init`; every <!-- FILL --> is an answer still to give.
 
-# The Book template version this repository's template-owned files came from. `factory book upgrade`
+# The Book template version this repository's template-owned files came from. `book upgrade`
 # compares against it and bumps it; never edit it by hand.
 book_version = "{{book_version}}"
 base_ref = "{{base_ref}}"
@@ -11,7 +11,7 @@ protected_branches = [{{protected_branches}}]
 # Each person's private settings file — outside every repository, never read by a session.
 private_settings = "~/.{{slug}}/local.toml"
 
-# This project's own names (`factory book verify` reports any other project's name as a leftover).
+# This project's own names (`book verify` reports any other project's name as a leftover).
 [book]
 name = "{{name}}"
 # The product's title, as the documents' headings carry it; `aliases` lists other names that are
@@ -20,10 +20,10 @@ title = "{{title}}"
 aliases = []
 slug = "{{slug}}"
 env_prefix = "{{env_prefix}}"
-# The stack and packs `factory book init` installed: verify, upgrade and the pack checks read them.
+# The stack and packs `book init` installed: verify, upgrade and the pack checks read them.
 stack = "{{stack}}"
 packs = [{{packs}}]
-# Template files this project chose not to carry, because its own file does the job: `factory book
+# Template files this project chose not to carry, because its own file does the job: `book
 # upgrade` reports each DECLINED and never writes it.
 declined = []
 # The columns of project.md Part 1's phase tables, in order; an optional one may be absent.
@@ -88,29 +88,29 @@ live_check_record = "requirements/fsd/read-me.txt"
 links_file = "requirements/read-me.txt"
 fsd_link_label = "{{fsd_label}}"
 # Other snapshot folders besides fsd_dir, each required to hold "<Name> - V<n>.<ext>" files
-# (`factory book verify`, N14) - for example "requirements/permissions-matrix".
+# (`book verify`, N14) - for example "requirements/permissions-matrix".
 snapshot_dirs = []
 
-# The FE team's existing Drive folder for /publish-guides — its one owner; the skill and its script
-# read it with `factory config fe_guides.drive_folder_id`.
+# The FE team's existing Drive folder for /book:publish-guides — its one owner; the skill and its script
+# read it with `book config fe_guides.drive_folder_id`.
 [fe_guides]
 drive_folder_id = "{{fe_drive_folder_id}}"
 # check-fe-guides.py: the guide that owns a section of api-contracts.md, where neither a guide's title nor its
 # **Base:** line names it; `guides = []` says no front-end guide owns it. Each entry gives its reason.
 # owners = [{ section = "Unversioned routes", guides = [], reason = "probes, API docs and browser pages" }]
 owners = []
-# /check-guides: error codes the source returns that no route can, so no guide names them; each with its
+# /book:check-guides: error codes the source returns that no route can, so no guide names them; each with its
 # reason. A code is `Module.Code`, or `Module.*` for a whole family.
 # internal_error_codes = [{ code = "Outbox.*", reason = "the mail queue's own; never reaches a client" }]
 internal_error_codes = []
-# Where /check-guides reads the source; the stack's defaults hold when these are unset (dotnet: src/*.cs,
+# Where /book:check-guides reads the source; the stack's defaults hold when these are unset (dotnet: src/*.cs,
 # the app.Map<Verb>( calls, and each module's Application and Domain Features folder).
 # source_files = ["src"]
 # route_calls = '\.Map(Get|Post|Put|Patch|Delete)\('
 # module_sources = ["src/*.Application/Features/{module}"]
 
 [ai_files]
-# One { name, account_id } per owner — each owner runs `factory pr whoami` and gives their id.
+# One { name, account_id } per owner — each owner runs `book pr whoami` and gives their id.
 owners = [
 {{owners_toml}}
 ]
@@ -149,6 +149,6 @@ skip_lines = '^\s*--'
 allowed = []
 message = "a data script never changes the schema; that is a migration's job (CLAUDE.md, Layout: database-scripts/ holds no schema). A sequence reset (ALTER SEQUENCE … RESTART) a seed script needs is an `allowed` entry with its reason."
 
-# `factory review-scope`: which parts of the review checklist a change needs read (book:self-review,
+# `book review-scope`: which parts of the review checklist a change needs read (book:self-review,
 # book:peer-review). Rows place a path; a dimension a matched row lists as not applicable is left out.
 {{review_scope}}

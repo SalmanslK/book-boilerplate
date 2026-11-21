@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # Tracked in the repository, because .git/hooks is per-clone and cannot be
-# shared. `factory book init` turns it on; in a new clone, once:
+# shared. `book init` turns it on; in a new clone, once:
 #
 #     git config core.hooksPath .githooks
 #
@@ -70,9 +70,9 @@ for py in python3 python "py -3"; do
         fi
         # The files that steer the AI this commit changes, the guard's own named apart: the guard asks
         # only about a write it sees, and a script or `git apply` writes unseen. A note, never a
-        # refusal - the owner's approval on the pull request is the gate (`factory ai-files`).
-        $py "$root/devtools/factory/factory.py" ai-files --staged \
-            || echo "pre-commit: could not list the files that steer the AI this commit changes (factory ai-files --staged failed); look at the diff yourself." >&2
+        # refusal - the owner's approval on the pull request is the gate (`book ai-files`).
+        $py "$root/devtools/book.py" ai-files --staged \
+            || echo "pre-commit: could not list the files that steer the AI this commit changes (book ai-files --staged failed); look at the diff yourself." >&2
         exit 0
     fi
 done

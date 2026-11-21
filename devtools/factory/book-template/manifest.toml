@@ -1,4 +1,4 @@
-# The Book template: what `factory book init` creates in a repository and `factory book verify` expects.
+# The Book template: what `book init` creates in a repository and `book verify` expects.
 # The template is the boilerplate's own Book. S files (the same in every project but for names) are
 # copied from it with the [source] names replaced; T files (a required shape, the project's content)
 # start from skeletons/ with <!-- FILL --> slots; P folders are created empty with a .gitkeep. A pack
@@ -7,19 +7,21 @@
 # Bump `version` (semver, the same as factory.toml's book_version) with any change here, in
 # skeletons/ or in packs/; a copied Book carries the version it came from.
 
-version = "1.3.4"
+version = "1.4.0"
 
 # The guard hook's matcher must cover every tool it judges (N2).
 guard_matcher = ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Monitor", "Read",
                  "Grep", "Glob", "NotebookRead", "mcp__.*[Dd]rive.*"]
 
 # The Book's skills and agents come from the book plugin, which every Book's settings enable (N16); a
-# project keeps no copy. `.claude/skills/` holds only its own skills: a pack's (deploy: deploy; fe-guides:
-# publish-guides, check-guides, release-notes) and, for v1.3.x, a stub per name the rename retired.
+# project keeps no copy. From v1.4.0 the packs' skills are the plugin's too (/book:deploy; /book:check-guides,
+# /book:publish-guides, /book:release-notes), each applying only where `[book] packs` names its pack, and the
+# Book's command is `book` (devtools/book.py). `.claude/skills/` holds only the project's own skills and, until
+# v1.5, a stub per name a move retired.
 plugin = "book@book-plugins"
 # The oldest book plugin release this template's files work with. A Book pins the plugin to a release tag in
-# .claude/settings.json (`ref`); `book verify` refuses an unpinned or older one, and `book upgrade` names it (D39).
-plugin_min = "0.4.0"
+# .claude/settings.json (`ref`); `book verify` refuses an unpinned or older one, and `book upgrade` names it (Book D39).
+plugin_min = "0.5.0"
 skills = []
 
 # P folders: kept in git even when empty (N19), created with a .gitkeep by init.
@@ -49,7 +51,7 @@ book = [
   ".githooks/pre-commit", ".githooks/commit-msg", ".claude/settings.json", ".claude/skills/**/*",
   "AGENTS.md", ".cursor/rules/docs.mdc", ".cursor/rules/tests.mdc", ".cursor/rules/boilerplate.mdc",
   "docs/plans/_template.md",
-  "devtools/factory/factory.py", "devtools/factory/bitbucket.py", "devtools/factory/jira.py",
+  "devtools/book.py", "devtools/factory/factory.py", "devtools/factory/bitbucket.py", "devtools/factory/jira.py",
   "devtools/factory/drive.py", "devtools/factory/deploy.py", "devtools/factory/book.py",
   "devtools/factory/snapshots.py", "devtools/factory/fixture_project.py",
   "devtools/factory/test_*.py", "devtools/factory/hooks/*", "devtools/factory/book-template/**/*",

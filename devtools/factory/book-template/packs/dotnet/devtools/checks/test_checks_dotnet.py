@@ -537,7 +537,7 @@ class ApiContractAnyPermissionTests(unittest.TestCase):
     interface = "IRequireAnyOf"
 
     def test_without_the_setting_no_any_of_is_read(self):
-        # The convention is the project's ([api_contracts] any_permission), not the pack's (D16).
+        # The convention is the project's ([api_contracts] any_permission), not the pack's (Book D16).
         self.interface = ""
         self.assertEqual(self.read("[Permissions.Stores.Create]"), {})
 
@@ -644,7 +644,7 @@ class ApiContractFixtureCase(unittest.TestCase):
 
 class ApiContractResponseSchemaTests(ApiContractFixtureCase):
     """Every response body type, and every type its fields name, gets a field list: the fields a client
-    receives, which /check-guides checks a guide's examples against."""
+    receives, which /book:check-guides checks a guide's examples against."""
 
     DTOS = (
         "public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int TotalCount);\n"

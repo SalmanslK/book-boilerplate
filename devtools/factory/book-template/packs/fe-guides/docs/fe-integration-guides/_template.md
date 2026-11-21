@@ -5,7 +5,7 @@
 <!-- Copy this file to `<module>.md` for a **built** module and fill it from the code, never from intent.
      Ownership: check-fe-guides.py matches a changed route in docs/api/api-contracts.md to this guide by its
      title or its Base. Move the Last checked line whenever the guide is checked against a new commit.
-     /check-guides reads the endpoint table below: keep its four columns. Delete this comment. -->
+     /book:check-guides reads the endpoint table below: keep its four columns. Delete this comment. -->
 
 What the module does for the front end, in two or three sentences. What every module does the same way
 (authentication, errors, paging) is in [api-conventions.md](api-conventions.md); do not repeat it here.

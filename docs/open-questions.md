@@ -43,7 +43,8 @@ plan; the reasoning is in [`architecture.md`](architecture.md).
 ### Layout and naming
 
 - **Where the Factory's referee lives:** in a Book + Factory install the kit puts it at
-  `devtools/ai-factory/factory.py`; the Book CLI keeps `devtools/factory/factory.py` until a rename release.
+  `devtools/ai-factory/factory.py`; the Book CLI is `devtools/book.py` (the `book` command), with
+  `devtools/factory/factory.py` working as `factory` until v1.5.
 - **The boilerplate's own stack is `none`:** its only code is the Python tooling, tested by
   `run-self-tests.py`.
 - **One version stamp:** `book_version` (semver) in `factory.toml` and `manifest.toml`.
@@ -53,7 +54,7 @@ plan; the reasoning is in [`architecture.md`](architecture.md).
 ### Requirements
 
 - **The requirements index keeps the `LINKS` blocks** (`requirements/read-me.txt`), which
-  `factory fsd-threads` and `book verify` parse; structured records may follow in a later minor version.
+  `book fsd-threads` and `book verify` parse; structured records may follow in a later minor version.
 - **The boilerplate's specification is its own `requirements/fsd/`**: V1 described the referee; V2
   describes the Book. Snapshots are never edited — a revision is a new file.
 

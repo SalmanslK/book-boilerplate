@@ -30,7 +30,7 @@ def compose(api: list[dict], postgres: list[dict], caddy: str = "9443", subnet: 
 
 
 class ComposeTests(unittest.TestCase):
-    # What [deploy.compose] in factory.toml names; the values are the project's, never the check's (D16).
+    # What [deploy.compose] in factory.toml names; the values are the project's, never the check's (Book D16).
     WANT = {"laptop": {"api": ["8080"], "postgres": ["127.0.0.1:5432"]},
             "DEV": {"api": ["8280"], "postgres": ["127.0.0.1:5532"], "caddy": ["9443"], "subnet": ["172.30.0.0/16"]},
             "QA": {"api": ["8281"], "postgres": [], "caddy": ["9444"], "subnet": ["172.31.0.0/16"]}}

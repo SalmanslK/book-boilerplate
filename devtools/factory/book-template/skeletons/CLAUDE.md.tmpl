@@ -138,18 +138,18 @@ home folder, no person's email or machine name *[enforced: the guard on every wr
   that dumps one, or a secret variable *[enforced: guard]*. Check that a secret is set with `test -n`;
   never print it. The person edits their private file themselves.
 - **A session reaches a service through a tool that holds the credential, never with it**, and never
-  pastes a token into a conversation: the Git host through `factory pr`, Jira through `factory jira`
+  pastes a token into a conversation: the Git host through `book pr`, Jira through `book jira`
   (read only). A skill that needs a new service gets a tool, not a token.
 
 ## Building and testing
 
 - **Build before committing**; warnings are errors.
 - **Test what the change can break, not everything**: the fast suites and the touched module's tests
-  before a commit, the full suite when the change is cross-cutting *[enforced: `factory impact`, which
+  before a commit, the full suite when the change is cross-cutting *[enforced: `book impact`, which
   picks the local run's tier]* ([how](tests/CLAUDE.md)).
 - **While CI is suspended, run `sh devtools/checks/ci-local.sh` on the commit before opening a pull
   request** and paste the *Local CI* section it prints into the description
-  *[enforced: `factory pr open`, local CI]*. It runs as deep as the change reaches
+  *[enforced: `book pr open`, local CI]*. It runs as deep as the change reaches
   ([the local run](devtools/README.md#the-local-run)).
 - **Report what ran** — the filter, and the executed, passed and skipped counts. A filter that matches
   nothing runs nothing, and a skipped test is not a pass.
@@ -165,19 +165,19 @@ home folder, no person's email or machine name *[enforced: the guard on every wr
   PR title. Never invent or borrow a key; no issue, plain name. Our own `D`/`Q` ids go in commit messages.
 - **A change to the files that steer the AI** — the `CLAUDE.md` files, `.claude/`, the AI tools, the guard,
   the checks, the hooks, CI — **is made or approved by an owner** (`[ai_files]` in
-  `devtools/factory/factory.toml`) *[enforced: `factory ai-files`]*. Its pull request names them on an
+  `devtools/factory/factory.toml`) *[enforced: `book ai-files`]*. Its pull request names them on an
   *AI files* line, which the local CI run prints, so the approval is asked for before the merge
-  *[enforced: `factory pr open` checks the description's AI files line]*.
+  *[enforced: `book pr open` checks the description's AI files line]*.
 - **Run `/book:self-review` before opening a PR**, in a fresh session or a subagent — never in the session
-  that wrote the change; `factory pr open` refuses a commit without a recorded READY verdict — a
+  that wrote the change; `book pr open` refuses a commit without a recorded READY verdict — a
   reminder, not proof the review ran.
 - **The agent opens a pull request only when the person asks**, from a pushed work branch, with
-  `factory pr open` — in the person's name, never into a protected branch but `{{base_branch}}`.
+  `book pr open` — in the person's name, never into a protected branch but `{{base_branch}}`.
 - **A pull request merges only with one approval from someone other than its author and a passing
   build** (while CI is suspended, its *Local CI* section): never merge past either warning.
 - **A PR description has a summary, a test plan and an Effort line**; a Jira issue's PR also has *Dev
   testing & notes for FE/QA*, and while CI is suspended a *Local CI* section — `/book:ship` drafts them
-  *[enforced: `factory pr open` checks the description before it opens the PR; `factory pr-check` reads
+  *[enforced: `book pr open` checks the description before it opens the PR; `book pr-check` reads
   it back]*.
 - Commit messages are imperative, with no AI or tooling attribution and no trailer lines *[enforced, for
   attribution and trailers — not the mood: `commit-msg` hook]*.
@@ -190,7 +190,7 @@ home folder, no person's email or machine name *[enforced: the guard on every wr
   deviations from the FE contract, behaviour that differs from a QA case, setup or data needed, known
   limitations — "none" rather than blank. A bug gets the short form: cause, fix, the FSD section it
   agrees with, how it was verified, notes.
-- **Read an issue with `factory jira <key>`**, which can only read. **Link, don't copy.** **Never put
+- **Read an issue with `book jira <key>`**, which can only read. **Link, don't copy.** **Never put
   credentials, tokens, test passwords or customer data in Jira.** Claude drafts on request and posts only
   after approval.
 
@@ -198,7 +198,7 @@ home folder, no person's email or machine name *[enforced: the guard on every wr
 
 ## Deploying
 
-<!-- FILL: DEV and QA only, through /deploy; never UAT or production. -->
+<!-- FILL: DEV and QA only, through /book:deploy; never UAT or production. -->
 
 ## Skills
 

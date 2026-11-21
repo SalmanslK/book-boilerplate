@@ -415,7 +415,7 @@ def identity_files(name: str, argv: list[str]) -> set[int]:
     """
     The positions in `argv` where ssh, scp or sftp is handed a key file (`-i <key>`, `-i<key>`, `-vi <key>`,
     `-o IdentityFile=<key>`). ssh reads the key in its own process and sends only a signature to the
-    server: the session never sees it — the way /deploy reaches the office server. Every other
+    server: the session never sees it — the way /book:deploy reaches the office server. Every other
     word is still judged, so `cat ~/.ssh/id_ed25519` and a remote command naming a store stay refused.
     Only the client's own options are read — up to `--` or the first word that is not one — and a key is
     never a word starting with `-` (`scp -i -i <store> host:` copies the store). A key inside the
@@ -2123,7 +2123,7 @@ RCLONE_REMOTE = re.compile(r"^(?::[A-Za-z]\w*|\w[\w.\-]+)(?:,[^:/\\]*)?:")
 
 def rclone_findings(args: list[str]) -> list[Finding]:
     """An rclone command that deletes, trashes or moves away what is on a remote (H4): the FE guides' Docs are
-    updated in place by /publish-guides and never removed by a session. A dry run changes nothing."""
+    updated in place by /book:publish-guides and never removed by a session. A dry run changes nothing."""
     deleting = rules().rclone_deleting
     if not deleting:
         return []
@@ -2134,7 +2134,7 @@ def rclone_findings(args: list[str]) -> list[Finding]:
                          for arg in args):
         return []
     command, remote = words[at].lower(), [bool(RCLONE_REMOTE.match(path)) for path in words[at + 1:]]
-    # `moveto gdrive:a.md gdrive:b.md` renames in place, as /publish-guides does; a move off the remote, or
+    # `moveto gdrive:a.md gdrive:b.md` renames in place, as /book:publish-guides does; a move off the remote, or
     # `move` into another folder, takes the Doc away.
     if (command in deleting and any(remote)) or (
             command in ("move", "moveto") and remote[:1] == [True] and (command == "move" or remote[1:2] != [True])):
@@ -2203,16 +2203,32 @@ def program(token: str) -> str:
 
 
 PYTHONS = re.compile(r"^(python|python3(\.\d+)?|py)$")
+# The Book's command, under either name: factory.py, and from v1.4.0 devtools/book.py, which forwards to it.
+# The script is its own path segment (`notebook.py` is not it), or - an unquoted Windows path reaches here with
+# its backslashes already dropped by the shell's own rules - the run-together `devtoolsbook.py` or
+# `devtoolsfactoryfactory.py`.
+COMMAND_SCRIPT = re.compile(r"(?:^|[/\\])(?:factory|book)\.py$|devtools(?:factory)?(?:factory|book)\.py$")
+
+# Or run as a module (`python -m book`, `-m devtools.book`, `-m devtools.factory.factory`, joined as `-mbook`).
+# Run directly (`./devtools/book.py`) or through `uv run`, the command is not judged yet: the v1.5 plan's §2.
+COMMAND_MODULE = re.compile(r"^(?:devtools\.)?(?:factory\.)?(?:book|factory)$")
+
+
+def next_arg(args: list[str], index: int) -> str:
+    return args[index + 1].lower() if index + 1 < len(args) else ""
 
 
 def factory_deploy_target(name: str, args: list[str]) -> str | None:
     """
-    The environment a `python …/factory.py deploy …` command names, upper-cased — `DEV` when it names
-    none, as deploy.py defaults — or None when the command is not a factory deploy.
+    The environment a `python …/factory.py deploy …` or `python …/book.py deploy …` command names (the same
+    command under its v1.4.0 name, devtools/book.py), upper-cased — `DEV` when it names none, as deploy.py
+    defaults — or None when the command is not a deploy.
     """
     if not PYTHONS.match(name):
         return None
-    scripts = [i for i, arg in enumerate(args) if arg.replace("\\", "/").rsplit("/", 1)[-1].lower() == "factory.py"]
+    scripts = [i for i, arg in enumerate(args) if COMMAND_SCRIPT.search(arg.lower())
+               or (arg.startswith("-m") and COMMAND_MODULE.match(arg[2:].lower() or next_arg(args, i)))]
+    scripts = [i + 1 if args[i] == "-m" else i for i in scripts]
     if not scripts or "deploy" not in args[scripts[0] + 1:]:
         return None
     rest = args[scripts[0] + 1:]
@@ -3887,8 +3903,8 @@ def shell_findings(command: str, cwd: str, repo: Repo, powershell: bool, depth: 
             # sees them: the environment it is given is the one word to judge. deploy.py refuses as well.
             findings.append(Finding(
                 "deploy-non-dev", DENY,
-                "factory deploy targets DEV and QA only. UAT and production go through the team's release "
-                "process.", None))
+                "book deploy (factory deploy before v1.4.0) targets DEV and QA only. UAT and production go "
+                "through the team's release process.", None))
 
         positional = [arg for arg in args if not arg.startswith("-")]
         raw_positional = [raw_arg for arg, raw_arg in zip(args, raw_args) if not arg.startswith("-")]

@@ -72,7 +72,7 @@ appsettings_secrets = true  # check-appsettings-secrets.sh's three rules on writ
 # (a server's deploy account runs its backups from it). Every other home-folder path is
 # personal and is refused in repository content (CLAUDE.md, Private settings). Set per project.
 service_accounts = ["deploy"]
-# Google Drive (CLAUDE.md, Skills): the FE guides reach Drive only through /publish-guides's rclone
+# Google Drive (CLAUDE.md, Skills): the FE guides reach Drive only through /book:publish-guides's rclone
 # script, which updates each Doc in place and never deletes one. A Drive connector's MCP tool — one whose
 # name `drive_connector` matches (a regex; the hook's matcher in .claude/settings.json must reach it too)
 # — is refused unless its own name starts with one of `drive_read_verbs`. An rclone command in
@@ -81,7 +81,7 @@ service_accounts = ["deploy"]
 drive_connector = '(?i)^mcp__.*drive'
 drive_read_verbs = ["read", "search", "list", "get", "fetch", "download", "export", "find"]
 rclone_deleting = ["delete", "deletefile", "purge", "rmdir", "rmdirs", "cleanup", "dedupe", "sync", "bisync"]
-drive_reason = "The FE guides are published only by /publish-guides (rclone), which updates each Doc in place; a session never creates, moves or trashes a Doc on Drive — a Doc to remove is the person's to trash by hand (CLAUDE.md, Skills). Reading Drive is allowed."
+drive_reason = "The FE guides are published only by /book:publish-guides (rclone), which updates each Doc in place; a session never creates, moves or trashes a Doc on Drive — a Doc to remove is the person's to trash by hand (CLAUDE.md, Skills). Reading Drive is allowed."
 
 # Tools decided against in this repository: installing one (pip, pipx, uv, npm, dotnet tool, winget…) or
 # running it (by name, `python -m`, `uvx`, `pipx run`, `npx`) is refused with the reason. `names` are
@@ -132,7 +132,7 @@ out_of_scope = ["wireframes"]
 "Wireframes" = "wireframes"
 "Client documents" = "client-documents"
 
-# The FE team's existing Google Drive folder the FE guides are published to (/publish-guides) —
+# The FE team's existing Google Drive folder the FE guides are published to (/book:publish-guides) —
 # its one owner: the skill and Publish-FeGuidesToDrive.ps1 read it from here, through
 # `python devtools/factory/factory.py config fe_guides.drive_folder_id`, and never repeat it.
 # `factory book verify` (N17) checks that. Folder link: https://drive.google.com/drive/folders/<id>
@@ -321,7 +321,7 @@ required = true
 
 # ---------------------------------------------------------------- deploy
 #
-# `factory deploy` (deploy.py), the steps /deploy runs. Addresses and paths, never secrets: the
+# `factory deploy` (deploy.py), the steps /book:deploy runs. Addresses and paths, never secrets: the
 # server's `.env` holds those and is never read. **DEV and QA are the only tables, and the host is
 # fixed here** — no argument names a host, so nothing can point a deploy anywhere else (the deployment
 # plan §9 and the product runbook own these values). A `<placeholder>` stops the deploy and says which.

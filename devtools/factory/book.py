@@ -684,6 +684,13 @@ def n15_factory_config(ctx: Context) -> list[Line]:
               and not FILL.search(str(o.get("account_id")))]
     if not owners:
         fill.append("[ai_files] owners (each owner runs `factory pr whoami`)")
+    notes = (ctx.config.get("deploy") or {}).get("notes") or {}
+    if notes:
+        import deploy as deploy_tool  # its steps, not a copy of the list
+        unknown = sorted(set(notes) - set(deploy_tool.NOTE_STEPS))
+        if unknown:
+            problems.append(f"[deploy.notes] {', '.join(unknown)}: no /book:deploy step has that name "
+                            f"({', '.join(deploy_tool.NOTE_STEPS)}), so the note is never read")
     trace = (ctx.config.get("requirements") or {}).get("traceability")
     if trace and not (ctx.root / trace).is_file():
         fill.append(f"{trace} (written by /book:fact-check)")
@@ -778,7 +785,7 @@ def plugin_ref(settings: str, plugin: str) -> tuple[bool, str]:
 
 def plugin_pin_line(settings: str, plugin: str, plugin_min: str) -> Line:
     """
-    The book plugin is pinned to a release (D39): a marketplace with no `ref`, or a branch, hands each new plugin
+    The book plugin is pinned to a release (Book D39): a marketplace with no `ref`, or a branch, hands each new plugin
     release to the project with no pull request, and a release older than the template's `plugin_min` lacks what
     the template's files call.
     """
@@ -805,16 +812,18 @@ def plugin_pin_line(settings: str, plugin: str, plugin_min: str) -> Line:
 
 def n17_drive_folder(ctx: Context) -> list[Line]:
     """
-    One owner: `[fe_guides] drive_folder_id` in factory.toml. The skill and its script read it from there
-    (`factory config fe_guides.drive_folder_id`) and repeat no folder id, so the two cannot drift.
+    One owner: `[fe_guides] drive_folder_id` in factory.toml. /book:publish-guides and its script read it from
+    there (`book config fe_guides.drive_folder_id`) and repeat no folder id, so the two cannot drift. From
+    v1.4.0 the skill is the book plugin's, so the fe-guides pack is known by `[book] packs`; a project copy
+    still there (an older Book's, or one kept on purpose) is held to the same rule.
     """
     name = "the FE Drive folder id is set, once"
     skill = ctx.text(".claude/skills/publish-guides/SKILL.md")
     script = ctx.text(".claude/skills/publish-guides/Publish-FeGuidesToDrive.ps1")
-    if skill is None and script is None:
-        return [Line(NA, name, "no publish-guides skill")]
-    if skill is None or script is None:
-        return [Line(MISSING, name, "publish-guides needs both SKILL.md and Publish-FeGuidesToDrive.ps1")]
+    if skill is not None and is_rename_stub(skill.encode("utf-8")):
+        skill = None  # the v1.4.0 stub only points at /book:publish-guides
+    if "fe-guides" not in installed_packs(ctx.config) and skill is None and script is None:
+        return [Line(NA, name, "no fe-guides pack")]
     folder_id = str((ctx.config.get("fe_guides") or {}).get("drive_folder_id") or "")
     if FILL.search(folder_id):
         return [Line(TO_FILL, name, "[fe_guides] drive_folder_id in factory.toml: the FE team's existing Drive "
@@ -822,13 +831,16 @@ def n17_drive_folder(ctx: Context) -> list[Line]:
     if not re.fullmatch(r"[\w-]+", folder_id):
         return [Line(MISSING, name, "no [fe_guides] drive_folder_id in factory.toml")]
     key = "fe_guides.drive_folder_id"
-    if re.search(r"drive\.google\.com/drive/folders/[\w-]+", skill) or folder_id in skill:
-        return [Line(WRONG, name, f"SKILL.md repeats a folder id; it names `{key}` in factory.toml instead")]
-    if re.search(r"\$FolderId\s*=\s*['\"][^'\"]+['\"]", script) or folder_id in script:
-        return [Line(WRONG, name, "the script hard-codes a folder id; it reads factory.toml's instead")]
-    missing = [rel for rel, text in (("SKILL.md", skill), ("the script", script)) if key not in text]
+    if skill is not None and (re.search(r"drive\.google\.com/drive/folders/[\w-]+", skill) or folder_id in skill):
+        return [Line(WRONG, name, f"the project's publish-guides SKILL.md repeats a folder id; it names `{key}` "
+                                  "in factory.toml instead")]
+    if script is not None and (re.search(r"\$FolderId\s*=\s*['\"][^'\"]+['\"]", script) or folder_id in script):
+        return [Line(WRONG, name, "the project's Publish-FeGuidesToDrive.ps1 hard-codes a folder id; it reads "
+                                  "factory.toml's instead")]
+    missing = [rel for rel, text in (("SKILL.md", skill), ("the script", script)) if text is not None and key not in text]
     if missing:
-        return [Line(WRONG, name, f"no `{key}` in {' or '.join(missing)}: it must read factory.toml's id")]
+        return [Line(WRONG, name, f"no `{key}` in the project's publish-guides {' or '.join(missing)}: it must "
+                                  "read factory.toml's id")]
     return [Line(OK, name, "[fe_guides] drive_folder_id in factory.toml")]
 
 
@@ -1256,7 +1268,7 @@ def init(target: Path, params: dict, manifest: dict, template_root: Path, run: R
             append = template_root / PACKS_DIR / pack / APPEND
             if append.is_file():
                 with open(target / CONFIG_RELATIVE, "a", encoding="utf-8", newline="\n") as handle:
-                    handle.write(append.read_text(encoding="utf-8"))
+                    handle.write(fill_skeleton(append.read_text(encoding="utf-8"), values))
                 lines.append(Line(OK, f"{CONFIG_RELATIVE}: the {pack} pack's additions"))
     folders = list(manifest.get("folders", []))
     for pack in packs:
@@ -1483,7 +1495,7 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
         else:
             notes.append(f"{COULD_NOT} the installed version: {where} - every file that differs from the new "
                          "template is kept, for a person")
-    # A Book installed before init recorded them (D30) compares no pack files until a person adds them.
+    # A Book installed before init recorded them (Book D30) compares no pack files until a person adds them.
     unrecorded = [key for key in ("stack", "packs") if key not in (config.get("book") or {})]
     if unrecorded:
         notes.append(f"{WRONG} [book] has no {' or '.join(unrecorded)}: no pack file is compared or written - add "
@@ -1512,8 +1524,10 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
             diffs.append(f"# {rel}: the project changed it, so it is kept. What the template changed, to "
                          "carry over by hand:\n" +
                          diff(rel, old_files[rel], new_files[rel], f"template {installed}", f"template {new_version}"))
+    notes += must_merge_notes(rows)
     notes += plugin_notes(target, config, manifest, rows)
     notes += fe_guides_notes(target, config)
+    notes += deploy_notes(config)
     if unoffered:
         notes.append(f"{len(unoffered)} rename stub(s) not offered: the installed version had none of these old "
                      f"names ({', '.join(sorted(rel.split('/')[2] for rel in unoffered))})")
@@ -1620,7 +1634,7 @@ def base_covers(base: str, path: str) -> bool:
 
 def fe_guides_notes(target: Path, config: dict) -> list[str]:
     """
-    A Book whose contracts list unversioned routes that nothing owns (D36): upgrade never writes factory.toml,
+    A Book whose contracts list unversioned routes that nothing owns (Book D36): upgrade never writes factory.toml,
     and check-fe-guides asks for an owner the first time one of those rows changes - as every one did when the
     generator gained the Source column. The skeleton's `[fe_guides] owners` example is commented out, since only
     a dotnet Book's contracts have the section; a person confirms whether the front end calls any of them.
@@ -1656,7 +1670,7 @@ def plugin_notes(target: Path, config: dict, manifest: dict, rows: list[tuple[st
                      "from it now - add its `extraKnownMarketplaces` and `enabledPlugins` entries from the "
                      "template's .claude/settings.json")
     else:
-        # A pin older than this template's plugin_min lacks what the new files call (D39).
+        # A pin older than this template's plugin_min lacks what the new files call (Book D39).
         try:
             _, ref = plugin_ref((target / ".claude/settings.json").read_text(encoding="utf-8"), plugin)
         except OSError:
@@ -1674,12 +1688,79 @@ def plugin_notes(target: Path, config: dict, manifest: dict, rows: list[tuple[st
     retired = sorted(rel for status, rel in rows
                      if rel.startswith(PLUGIN_OWNED) and (status == DROPPED or
                                                           (status == CONFLICT and rel.endswith("/SKILL.md"))))
+    # A dropped test that loads one of those scripts fails CI the moment the script goes: it goes with them.
+    scripts = {Path(rel).name for rel in retired if rel.endswith(".py")}
+    tests = []
+    for status, rel in rows:
+        if status == DROPPED and Path(rel).name.startswith("test_") and rel.endswith(".py"):
+            try:
+                text = (target / rel).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if any(name in text for name in scripts):
+                tests.append(rel)
+    if tests:
+        notes.append(f"{WRONG} {', '.join(sorted(tests))} (DROPPED) load(s) a retired script below: delete them "
+                     "with the scripts, or CI fails on the missing file")
     if retired:
-        notes.append(f"{WRONG} {len(retired)} old skill or agent file(s) the v1.3.0 rename retired are kept "
-                     "(DROPPED or CONFLICT below, under .claude/skills/ and .claude/agents/; the plugin or a pack "
-                     "skill's new name provides each now): once the plugin is enabled, carry any local edit over "
-                     "and delete them; a CONFLICT SKILL.md takes the template's stub")
+        notes.append(f"{WRONG} {len(retired)} old skill or agent file(s) a move into the book plugin retired are "
+                     "kept (DROPPED or CONFLICT below, under .claude/skills/ and .claude/agents/; the plugin "
+                     "provides each now - v1.3.0 moved the Book's skills and agents, v1.4.0 the packs' skills): "
+                     "once the plugin is enabled, carry any local edit over (a pack skill's project facts go in "
+                     "factory.toml: [fe_guides], [deploy]) and delete them; a CONFLICT SKILL.md takes the "
+                     "template's stub")
     return notes
+
+
+# What `book` (devtools/book.py, v1.4.0) needs merged first: factory.py's main() names the command, and the guard
+# judges a deploy under either name. A kept older copy of either makes the new name fail, or pass unjudged.
+BOOK_ENTRY = "devtools/book.py"
+BOOK_NEEDS = ("devtools/factory/factory.py", "devtools/factory/hooks/guard.py")
+# What each kept file means until it is merged, one clause per file.
+MERGE_UNTIL = {"devtools/factory/factory.py": "`book` runs as the old `factory`",
+               "devtools/factory/hooks/guard.py": "the guard judges a deploy only under the name factory.py"}
+
+
+def must_merge_notes(rows: list[tuple[str, str]]) -> list[str]:
+    """The project gets devtools/book.py, but keeps its own factory.py or guard.py (a CONFLICT): merge them first."""
+    status = dict((rel, s) for s, rel in rows)
+    kept = [rel for rel in BOOK_NEEDS if status.get(rel) == CONFLICT]
+    if status.get(BOOK_ENTRY) != NEW or not kept:
+        return []
+    until = " and ".join(MERGE_UNTIL[rel] for rel in kept)
+    return [f"{WRONG} {BOOK_ENTRY} is NEW, but the project keeps its own {' and '.join(kept)} (CONFLICT below): merge "
+            f"{'these' if len(kept) > 1 else 'it'} before using book - until then {until}"]
+
+
+# What /book:deploy reads from [deploy]: what deploy.py needs before it runs (`target()`), and the keys v1.4.0
+# added for the skill's project facts, which a Book from before it has not got.
+DEPLOY_ADDED = ("runbook", "audit_record")
+
+
+def deploy_notes(config: dict) -> list[str]:
+    """
+    A Book with the deploy pack: from v1.4.0 the procedure is /book:deploy and the project's facts are
+    factory.toml's [deploy] (upgrade never writes factory.toml). Which keys are still to fill, by deploy.py's own
+    rule (a missing key, or a `<…>` anywhere in a value), for a person.
+    """
+    if "deploy" not in installed_packs(config):
+        return []
+    import deploy as deploy_tool  # the rule a deploy stops on, not a second copy of it
+
+    deploy = config.get("deploy") or {}
+    keys = list(dict.fromkeys(key for env in deploy_tool.ENVIRONMENTS for key in deploy_tool.unfilled(deploy, env)))
+    added = [f"[deploy] {key}" for key in DEPLOY_ADDED if key not in deploy]
+    if not keys and not added:
+        return []
+    parts = []
+    if keys:
+        parts.append(f"{', '.join(keys)} to fill - a deploy stops on each")
+    if added:
+        parts.append(f"{', '.join(added)} to add (the deployment plan, and where the last audit is recorded; "
+                     "\"\" when there is none)")
+    return [f"{CONFIRM} /book:deploy reads the project's facts from factory.toml [deploy]: {'; '.join(parts)}. "
+            "The keys and their meaning are the deploy pack's factory-append.toml; an edited .claude/skills/deploy/"
+            "SKILL.md's own detail goes in `runbook` or an optional [deploy.notes] table, by step"]
 
 
 def executable_in_template(template_root: Path, manifest: dict, params: dict, packs: list[str], run: Runner) -> set[str]:
@@ -1731,5 +1812,5 @@ def main(root: Path, config_raw: dict, args, private: dict | None = None, run: R
 
 
 if __name__ == "__main__":  # pragma: no cover - run through factory.py
-    print("Run it as `python3 devtools/factory/factory.py book verify`.", file=sys.stderr)
+    print("Run it as `python3 devtools/book.py verify`.", file=sys.stderr)
     sys.exit(2)

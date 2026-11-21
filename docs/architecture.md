@@ -15,7 +15,7 @@ Three parts, each with one job:
 
 **Every project-specific value lives in `devtools/factory/factory.toml`.** A tool reads its names,
 branches, paths and keys from there and carries none of its own. Why: the same tooling then serves
-every project, and `factory book verify` can say a leftover name from another project is a defect.
+every project, and `book verify` can say a leftover name from another project is a defect.
 
 ## 2. Where code lives
 
@@ -49,7 +49,7 @@ The guard holds no project's rules: `[guard]` does. Its self-tests run against a
 
 ### Upgrades: three copies, and a project's change always wins
 
-`factory book upgrade`, run from a newer boilerplate, compares each file the template owns in three
+`book upgrade`, run from a newer boilerplate, compares each file the template owns in three
 copies: the project's, the installed version's and the new template's. The installed version is
 `book_version` in the project's `factory.toml` (init writes it; a Book from before 1.2 falls back to
 its copied `book-template/manifest.toml`), rebuilt from the boilerplate's git tag `v<version>` with the
@@ -195,7 +195,7 @@ Scripts are `check-<rule>.py` (fails on a broken rule), `gen-<doc>.py` (writes a
 
 | Trade-off | Why we accept it |
 |---|---|
-| The Book CLI keeps the name `devtools/factory/factory.py` | Every project's skills and hooks call it there; a rename is its own release. In a Book + Factory install the referee goes to `devtools/ai-factory/` |
+| The Book CLI is `book` (`devtools/book.py`), and `devtools/factory/factory.py` keeps working as `factory` until v1.5 | Projects on an older Book, their pipelines and their hooks still call `factory.py`; the alias goes in its own release ([the v1.5 plan](plans/book-v1.5.md)). The module stays `devtools/factory/factory.py`. In a Book + Factory install the referee goes to `devtools/ai-factory/` |
 | `ai-files`, `pr` and `protection` speak Bitbucket only | The projects using the Book are on Bitbucket; with no Bitbucket remote they report `N/A`, never `OK`. GitHub is a later pack |
-| The boilerplate has no CI runner | It is tooling only; `ci-local.sh` runs the same checks, and its PASS is required by `factory pr open` |
+| The boilerplate has no CI runner | It is tooling only; `ci-local.sh` runs the same checks, and its PASS is required by `book pr open` |
 | A pack's tests run only in a Book that installed it | They test files that are not live here; `test_book.py` installs every stack and pack into a scratch repository and checks the files land; the pack's own tests run in the Book that installed it |
