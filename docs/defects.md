@@ -61,3 +61,7 @@ One line per fixed defect: id, what it was, and the commit or release that fixed
 - **D28** — `check-fe-guides.py` did not read a *Last checked* field its header wraps across two lines. Fixed in v1.2.8.
 - **D29** — the dotnet pack's self-tests imported the fe-guides pack's check, so a dotnet Book without that pack could not run them. Fixed in v1.2.8.
 - **D30** — `factory book init` did not record the stack and packs in a new Book's `factory.toml`, so its verify and pack checks saw none installed. Fixed in v1.2.9.
+- **D31** — `factory book upgrade` offered a rename stub (NEW) for an old skill name the project never had. Fixed in v1.3.3.
+- **D32** — the dotnet pack's contracts generator wrote "tenant scoping" whatever the project's `[book] scoping_word`. Fixed in v1.3.3.
+- **D33** — `check-fe-guides` read the contracts' first *Response schemas* section as every type changed, so every FE guide looked unchecked. Fixed in v1.3.3.
+- **D34** — a syntax error in a pack's Python file passed the boilerplate's self-tests, which never import the packs' tests. Fixed in v1.3.3.

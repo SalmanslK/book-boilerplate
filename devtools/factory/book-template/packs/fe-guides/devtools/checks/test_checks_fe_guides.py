@@ -299,6 +299,23 @@ class FeGuidesTests(RepoTestCase):
         code, out = self.check()
         self.assertEqual(0, code, out)
 
+    def test_response_schemas_listed_for_the_first_time_change_no_row(self):
+        # The base's contracts predate the generator's response field lists: none of their types is new.
+        self.repo.write(fe_guides.CONTRACTS, self.contracts().split("## Response schemas", 1)[0])
+        self.repo.commit("Contracts without response schemas")
+        self.repo.git("branch", "-f", "main", "HEAD")
+        self.repo.write(fe_guides.CONTRACTS, self.contracts())
+        self.repo.commit()
+        code, out = self.check()
+        self.assertEqual(0, code, out)
+
+    def test_a_schema_section_deleted_on_the_branch_still_changes_its_rows(self):
+        self.repo.write(fe_guides.CONTRACTS, self.contracts().split("## Response schemas", 1)[0])
+        self.repo.commit()
+        code, out = self.check()
+        self.assertEqual(1, code)
+        self.assertIn("farms.md: GET /api/v1/farms changed", out)
+
     def test_the_guide_template_is_not_a_guide(self):
         self.repo.write(fe_guides.GUIDES + "_template.md",
                         self.guide("Companies and Locations", "`/api/v1/companies`"))

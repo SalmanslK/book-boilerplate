@@ -564,7 +564,12 @@ class ApiContractSettingsTests(unittest.TestCase):
     def test_none_by_default(self):
         self.assertEqual(self.settings("[book]\nname = 'Acme'\n"),
                          {"header_filters": [], "any_permission": "", "unversioned_notes": {}, "section_titles": {},
-                          "non_route_calls": []})
+                          "non_route_calls": [], "scoping_word": "tenant"})
+
+    def test_the_scoping_word_comes_from_the_book(self):
+        # The contracts' preface names the project's own boundary ([book] scoping_word), never a fixed word.
+        self.assertEqual(self.settings("[book]\nscoping_word = 'company'\n")["scoping_word"], "company")
+        self.assertEqual(self.settings("[book]\nscoping_word = ''\n")["scoping_word"], "tenant")
 
     def test_non_route_calls_is_a_list_of_map_method_names(self):
         self.assertEqual(self.settings('[api_contracts]\nnon_route_calls = ["MapDomainEvents"]\n')["non_route_calls"],

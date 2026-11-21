@@ -74,9 +74,12 @@ def contract_settings(root: Path = ROOT) -> dict:
     """
     try:
         with open(root / "devtools" / "factory" / "factory.toml", "rb") as handle:
-            table = tomllib.load(handle).get("api_contracts") or {}
+            config = tomllib.load(handle)
     except (OSError, ValueError):
-        table = {}
+        config = {}
+    table = config.get("api_contracts") or {}
+    # The project's word for its scoping boundary (`[book] scoping_word`: company, lab); "tenant" without one.
+    scoping = str((config.get("book") or {}).get("scoping_word") or "").strip() or "tenant"
     filters = table.get("header_filters") or []
     if not all(isinstance(f, dict) and {"filter", "header", "variable"} <= set(f) for f in filters):
         raise SystemExit("factory.toml [api_contracts] header_filters: each entry names filter, header and variable")
@@ -95,7 +98,7 @@ def contract_settings(root: Path = ROOT) -> dict:
                          "listing one would hide every route it maps. Name only the project's own Map… calls "
                          "that map none.")
     return {"header_filters": filters, "any_permission": str(table.get("any_permission") or ""), **tables,
-            "non_route_calls": list(calls)}
+            "non_route_calls": list(calls), "scoping_word": scoping}
 
 
 SETTINGS = contract_settings()
@@ -1088,7 +1091,7 @@ def render(groups: list[Group], unversioned: list[UnversionedRoute], types: Type
     w("> [`fe-api-coverage.md`](fe-api-coverage.md) tracks what **they** call and whether we")
     w("> have it; [`../fe-integration-guides/`](../fe-integration-guides/) explains each")
     w("> built module to them. What every route does the same way — bearer auth, the")
-    w("> error shape, paging, tenant scoping — is in")
+    w(f"> error shape, paging, {SETTINGS['scoping_word']} scoping — is in")
     w("> [`api-conventions.md`](../fe-integration-guides/api-conventions.md) and is not")
     w("> repeated here. Request and response field lists are at the end; the OpenAPI document")
     w("> (`/openapi/v1.json`) has the rest.")

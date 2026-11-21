@@ -1440,10 +1440,15 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
                      f"{', '.join(stale)} - remove them from the list")
     rows: list[tuple[str, str]] = []
     diffs: list[str] = []
+    unoffered: list[str] = []
     for rel in sorted(set(new_files) | set(old_files)):
         current = target / rel
         project = current.read_bytes() if current.is_file() else None
         status = DECLINED if rel in declined else classify(project, old_files.get(rel), new_files.get(rel), known)
+        if status == NEW and known and rel.startswith(".claude/skills/") and is_rename_stub(new_files[rel]):
+            # A stub keeps an old name working; a name the installed version never had needs none.
+            unoffered.append(rel)
+            continue
         rows.append((status, rel))
         if status in (BEHIND, NEW, UNKNOWN):
             diffs.append(diff(rel, project, new_files[rel], "project", f"template {new_version}"))
@@ -1452,6 +1457,9 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
                          "carry over by hand:\n" +
                          diff(rel, old_files[rel], new_files[rel], f"template {installed}", f"template {new_version}"))
     notes += plugin_notes(target, config, manifest, rows)
+    if unoffered:
+        notes.append(f"{len(unoffered)} rename stub(s) not offered: the installed version had none of these old "
+                     f"names ({', '.join(sorted(rel.split('/')[2] for rel in unoffered))})")
     counts = {s: sum(r[0] == s for r in rows)
               for s in (CURRENT, BEHIND, NEW, CHANGED, CONFLICT, REMOVED, DROPPED, UNKNOWN, DECLINED)}
     mode = "--apply" if apply else "report only, nothing written (--apply updates the BEHIND and NEW files)"
@@ -1490,6 +1498,17 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
 
 
 OLD_REVIEW_FOLDER = ".claude/skills/review-pr/references"
+FRONTMATTER = re.compile(rb"\A---\r?\n(.*?)\r?\n---\r?\n", re.S)
+
+
+def is_rename_stub(content: bytes) -> bool:
+    """A skill whose only job is to point an old name at its new one: its frontmatter, not its body, says
+    `description: Renamed to ...` and `disable-model-invocation: true`."""
+    head = FRONTMATTER.match(content)
+    lines = head.group(1).splitlines() if head else []
+    return (any(line.startswith(b"description: Renamed to ") for line in lines)
+            and any(line.strip() == b"disable-model-invocation: true" for line in lines))
+
 PLUGIN_OWNED = (".claude/skills/", ".claude/agents/")
 
 

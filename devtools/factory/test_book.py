@@ -1015,6 +1015,22 @@ class Upgrade(unittest.TestCase):
         self.assertEqual(self.read(".claude/skills/s/SKILL.md"), "# Acme skill, v1, with our own step\n")
         self.assertTrue((self.target / "devtools/checks/new.py").is_file(), "a new file overwrites nothing")
 
+    def test_a_rename_stub_is_offered_only_for_a_name_the_installed_version_had(self):
+        stub = ("---\nname: {0}\ndescription: Renamed to /book:{0}, in the book plugin.\n"
+                "disable-model-invocation: true\n---\n\n# /{0} was renamed\n")
+        self.release("1.2.0", {".claude/skills/s/SKILL.md": stub.format("s"),
+                               ".claude/skills/never-had/SKILL.md": stub.format("never-had"),
+                               # A stub elsewhere (a pack's, in the template copy) is an ordinary file.
+                               "devtools/factory/book-template/packs/p/.claude/skills/old/SKILL.md": stub.format("old")})
+        report = self.upgrade()
+        self.assertIn("CONFLICT  .claude/skills/s/SKILL.md", report.splitlines())
+        self.assertNotIn(".claude/skills/never-had/SKILL.md", report)
+        self.assertIn("NEW       devtools/factory/book-template/packs/p/.claude/skills/old/SKILL.md", report.splitlines())
+        self.assertIn("1 rename stub(s) not offered: the installed version had none of these old names (never-had)",
+                      report)
+        self.upgrade(apply=True)
+        self.assertFalse((self.target / ".claude/skills/never-had").exists())
+
     def test_a_file_differing_only_in_line_endings_is_current(self):
         (self.target / "AGENTS.md").write_bytes(b"Agents for Acme.\r\n")
         self.assertIn("CURRENT   AGENTS.md", self.upgrade().splitlines())
@@ -1117,6 +1133,17 @@ class TheRealTemplate(unittest.TestCase):
             skeletons.update(pack.get("skeletons", {}))
         absent = [s for s in skeletons.values() if not (HERE / "book-template/skeletons" / s).is_file()]
         self.assertEqual(absent, [])
+
+    def test_every_python_file_in_the_template_compiles(self):
+        # The packs' self-tests run only in an installed Book, so a syntax error in one would pass here unseen.
+        template = HERE / "book-template"
+        broken = []
+        for path in sorted(template.rglob("*.py")):
+            try:
+                compile(path.read_bytes(), str(path), "exec")
+            except SyntaxError as error:
+                broken.append(f"{path.relative_to(template).as_posix()}:{error.lineno}: {error.msg}")
+        self.assertEqual([], broken)
 
     def test_every_pack_has_files_and_names_no_source_project(self):
         packs = HERE / "book-template" / "packs"

@@ -8,7 +8,8 @@ fails a stale copy — so it is the exact signal of what changed. This check rea
 at HEAD, finds each route row that changed (added, removed or reworded — its permission, request or
 responses), and a schema that changed counts as a change to every row that sends or returns it, or a
 type holding it (a field list under Request or Response schemas; the declaring file's path is not part of
-it). Each changed row's section (`### Heading`) has an owner guide under `docs/fe-integration-guides/`, found in this order:
+it). A schema section the base does not list yet (the generator began listing response
+types) changes no row. Each changed row's section (`### Heading`) has an owner guide under `docs/fe-integration-guides/`, found in this order:
 
 1. `[fe_guides] owners` in devtools/factory/factory.toml, by the section's heading, with a reason:
    `{ section = "Preferences", guides = ["profile-and-preferences"], reason = "…" }`; `guides = []`
@@ -98,15 +99,21 @@ class Contracts:
         self.prefix: dict[str, str] = {}
         self.rows: dict[str, set[str]] = {}
         self.schemas: dict[str, str] = {}
+        # The schema sections the contracts have, and each schema's section.
+        self.listed: set[str] = set()
+        self.section_of: dict[str, str] = {}
         top = heading = ""
         for line in (text or "").splitlines():
             if line.startswith("## "):
                 top = heading = line[3:].strip()
+                if top in SCHEMAS:
+                    self.listed.add(top)
                 continue
             if line.startswith("### "):
                 heading = line[4:].strip()
                 if top in SCHEMAS:
                     self.schemas[heading] = ""
+                    self.section_of[heading] = top
                 continue
             if top in SCHEMAS and heading in self.schemas:
                 # The fields and a not-found note, never the declaring file's path: a type moved to
@@ -148,8 +155,11 @@ def changed_rows(before: Contracts, after: Contracts) -> list[tuple[str, str]]:
     found: set[tuple[str, str]] = set()
     for heading in set(before.rows) | set(after.rows):
         found |= {(heading, row) for row in before.rows.get(heading, set()) ^ after.rows.get(heading, set())}
+    # A schema section the base does not list yet (the generator began listing response types) is not an
+    # API change; one HEAD no longer lists still is, so a deleted section shows.
     changed = {schema for schema in set(before.schemas) | set(after.schemas)
-               if before.schemas.get(schema) != after.schemas.get(schema)}
+               if (after.section_of.get(schema) or before.section_of.get(schema)) in before.listed
+               and before.schemas.get(schema) != after.schemas.get(schema)}
     queue = list(changed)
     while queue:
         inner = queue.pop()
