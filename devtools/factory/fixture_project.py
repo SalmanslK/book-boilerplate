@@ -139,6 +139,8 @@ out_of_scope = ["wireframes"]
 [fe_guides]
 # Not the template's placeholder (manifest [source] fe_drive_folder_id), which init replaces in a copied Book.
 drive_folder_id = "fixture-drive-folder-1"
+# As in the skeleton, an owners key comes here, before the [ai_files] one: a test that edits owners says which.
+owners = []
 
 # What a change reaches beyond its modules: a generated doc to regenerate, and changes that
 # cannot be undone by reverting (a migration is forward-only). `match` is a regex over a path.

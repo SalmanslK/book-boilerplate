@@ -378,6 +378,16 @@ def git(root: Path, *args: str) -> str:
     return done.stdout.strip()
 
 
+def edit_ai_files(root: Path, change) -> None:
+    """Rewrites only the [ai_files] section of a repository's factory.toml: other sections ([fe_guides])
+    have an owners key too, and come first."""
+    config = root / factory.CONFIG_RELATIVE
+    before, section = config.read_text(encoding="utf-8").split("\n[ai_files]\n", 1)
+    changed = change(section)
+    assert changed != section, "the [ai_files] section did not change"
+    config.write_text(before + "\n[ai_files]\n" + changed, encoding="utf-8")
+
+
 @unittest.skipUnless(shutil.which("git"), "needs git")
 class RepositoryTests(unittest.TestCase):
     """
@@ -544,9 +554,8 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("must approve it after its latest commit", out)
 
     def test_with_no_owners_nothing_passes(self):
-        config = self.root / "devtools" / "factory" / "factory.toml"
-        text = config.read_text(encoding="utf-8")
-        config.write_text(re.sub(r"owners = \[.*?\n\]", "owners = []", text, count=1, flags=re.S), encoding="utf-8")
+        edit_ai_files(self.root, lambda section: re.sub(r"owners = \[.*?\n\]", "owners = []", section, count=1,
+                                                        flags=re.S))
         git(self.root, "commit", "-qam", "No owners")
         git(self.root, "update-ref", "refs/remotes/origin/dev", "HEAD")
         git(self.root, "checkout", "-q", "--no-track", "-b", "chore/x")
@@ -683,9 +692,10 @@ class RepositoryTests(unittest.TestCase):
 
     def test_staged_judges_by_the_destinations_owners_not_the_commits(self):
         git(self.root, "checkout", "-q", "--no-track", "-b", "chore/x")
-        config = self.root / "devtools" / "factory" / "factory.toml"
-        config.write_text(config.read_text(encoding="utf-8").replace(
-            "owners = [", 'owners = [{ name = "Test Person", account_id = "acc-dev" }, ', 1), encoding="utf-8")
+        edit_ai_files(self.root, lambda section: section.replace(
+            "owners = [", 'owners = [{ name = "Test Person", account_id = "acc-dev" }, ', 1))
+        self.assertEqual("acc-dev", factory.load_config(self.root).raw["ai_files"]["owners"][0]["account_id"],
+                         "the edit reached the [ai_files] list, not the [fe_guides] one (D37)")
         git(self.root, "add", "-A")
         code, out = self.factory("ai-files", "--staged")
         self.assertEqual(code, 0, out)
@@ -710,10 +720,8 @@ class RepositoryTests(unittest.TestCase):
 
     def test_a_pr_cannot_make_its_own_author_an_owner(self):
         git(self.root, "checkout", "-q", "--no-track", "-b", "chore/x")
-        config = self.root / "devtools" / "factory" / "factory.toml"
-        text = config.read_text(encoding="utf-8")
-        config.write_text(text.replace("owners = [", 'owners = [{ name = "A Developer", account_id = "acc-dev" }, ', 1),
-                          encoding="utf-8")
+        edit_ai_files(self.root, lambda section: section.replace(
+            "owners = [", 'owners = [{ name = "A Developer", account_id = "acc-dev" }, ', 1))
         self.assertIn("acc-dev", factory.load_config(self.root).raw["ai_files"]["owners"][0]["account_id"])
         git(self.root, "commit", "-qam", "Make myself an owner")
         with mock.patch.object(factory, "bitbucket_client", return_value=self.ai_pr()):

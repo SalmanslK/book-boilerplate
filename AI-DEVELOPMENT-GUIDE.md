@@ -43,6 +43,10 @@ v1.3.0 moved the Book's own skills and agents into the **book plugin** (each cal
 renamed some. An old name still in a doc, a chat or a habit means the new one here. For v1.3.x a stub
 under each old name says the same and does nothing else.
 
+The plugin is pinned to a release tag (`ref` in `.claude/settings.json`'s `extraKnownMarketplaces`), so a
+new plugin release reaches the project only through a reviewed change: take one by moving `ref` in a pull
+request. `factory book verify` refuses an unpinned plugin or one older than the template needs.
+
 | Before v1.3.0 | Now |
 |---|---|
 | `/requirements-check` | `/book:check-sources` |

@@ -138,7 +138,10 @@ email-templates/
   -> designs
 """
 
-SETTINGS = {"attribution": {"commit": "", "pr": ""}, "enabledPlugins": {"book@book-plugins": True}, "hooks":{"PreToolUse": [{"matcher": MATCHER, "hooks": [
+PINNED = {"book-plugins": {"source": {"source": "github", "repo": "owner/book-plugin", "ref": "v0.4.0"},
+                           "autoUpdate": False}}
+SETTINGS = {"attribution": {"commit": "", "pr": ""}, "extraKnownMarketplaces": PINNED,
+            "enabledPlugins": {"book@book-plugins": True}, "hooks":{"PreToolUse": [{"matcher": MATCHER, "hooks": [
     {"type": "command", "timeout": 30, "command":
      "for py in python3; do exec \"$py\" devtools/factory/hooks/guard.py; done; echo '{\"permissionDecision\":\"deny\"}'"}]}]}}
 
@@ -469,6 +472,46 @@ class EachCheck(BookCase):
             with self.subTest(settings):
                 self.write(".claude/settings.json", settings)
                 self.assertFails(book.n16_skills, book.MISSING)
+
+    def test_n16_the_plugin_is_pinned_to_a_release_no_older_than_the_template_needs(self):
+        def with_market(entry) -> None:
+            settings = json.loads(json.dumps(SETTINGS))
+            settings["extraKnownMarketplaces"] = {"book-plugins": entry} if entry is not None else {}
+            self.write(".claude/settings.json", json.dumps(settings))
+
+        def pin_status() -> tuple[str, str]:
+            line = next(l for l in book.n16_skills(self.ctx()) if l.element == "the book plugin is pinned to a release")
+            return line.status, line.render()
+
+        self.assertEqual(book.OK, pin_status()[0], "the fixture pins v0.4.0, this template's plugin_min")
+        source = {"source": "github", "repo": "owner/book-plugin"}
+        for ref, status in (("v9.0.0", book.OK), ("v0.3.0", book.WRONG), (None, book.WRONG), ("main", book.WRONG),
+                            ("e1e60175b0fbacdcc28342946e20b41461fe7d7a", book.CONFIRM),
+                            ("E1E60175B0FBACDCC28342946E20B41461FE7D7A", book.CONFIRM)):
+            with self.subTest(ref):
+                with_market({"source": dict(source, ref=ref) if ref else source})
+                got, text = pin_status()
+                self.assertEqual(status, got, text)
+                if ref in (None, "main"):
+                    self.assertIn("unpinned", text)
+        # Pinned, but not to anything this check can compare: said so, never "unpinned".
+        for ref in ("0.4.0", "v0.5.0-rc.1", "V0.4.0", "refs/tags/v0.4.0", "e1e6017"):
+            with self.subTest(ref):
+                with_market({"source": dict(source, ref=ref)})
+                got, text = pin_status()
+                self.assertEqual(book.WRONG, got, text)
+                self.assertIn(f"pinned to {ref!r}, which is not a vX.Y.Z release tag or a full commit SHA", text)
+                self.assertNotIn("unpinned", text)
+        with_market(None)
+        self.assertEqual(book.CONFIRM, pin_status()[0], "no marketplace entry: say where the plugin comes from")
+        with_market({"source": dict(source, ref="v0.4.0")})
+        self.manifest = dict(self.manifest, plugin_min="0.4")
+        with self.assertRaises(book.BookError, msg="a malformed plugin_min stops verify, not a skipped floor"):
+            book.n16_skills(self.ctx())
+        self.manifest = dict(self.manifest, plugin_min=MANIFEST["plugin_min"])
+        self.write(".claude/settings.json", '{"enabledPlugins": {}}')
+        self.assertNotIn("the book plugin is pinned to a release",
+                         [l.element for l in book.n16_skills(self.ctx())], "no plugin enabled, nothing to pin")
 
     def test_n17_drive_folder(self):
         self.assertPasses(book.n17_drive_folder)
@@ -859,6 +902,23 @@ class PluginNotes(unittest.TestCase):
         self.assertEqual(self.notes('{"enabledPlugins": {"book@book-plugins": true}}', config,
                                     [(book.CURRENT, ".claude/skills/commit/SKILL.md")]), "")
 
+    def test_a_pin_older_than_the_new_templates_plugin_min_is_named(self):
+        config = {"review_scope": {"folder": ".claude/review"}}
+        self.MANIFEST = {"plugin": "book@book-plugins", "plugin_min": "0.4.0", "version": "1.3.4"}
+        for ref, named in (("v0.3.0", True), ("v0.4.0", False), ("main", False)):
+            with self.subTest(ref):
+                settings = json.dumps({"enabledPlugins": {"book@book-plugins": True}, "extraKnownMarketplaces": {
+                    "book-plugins": {"source": {"source": "github", "repo": "o/p", "ref": ref}}}})
+                text = self.notes(settings, config, [])
+                self.assertEqual(named, "pins the book plugin at v0.3.0, older than template 1.3.4's plugin_min "
+                                        "0.4.0" in text, text)
+
+    def test_a_malformed_plugin_min_stops_the_upgrade_and_the_templates_parses(self):
+        self.MANIFEST = {"plugin": "book@book-plugins", "plugin_min": "v0.4"}
+        with self.assertRaises(book.BookError):
+            self.notes('{"enabledPlugins": {}}', {}, [])
+        self.assertTrue(book.version_key(book.plugin_floor(book.load_manifest())), "the template names a semver")
+
     def test_missing_or_broken_settings_count_as_not_enabled(self):
         for settings in (None, "not json", "[]"):
             with self.subTest(settings):
@@ -867,6 +927,50 @@ class PluginNotes(unittest.TestCase):
     def test_a_template_with_no_plugin_adds_no_notes(self):
         with tempfile.TemporaryDirectory() as folder:
             self.assertEqual(book.plugin_notes(Path(folder), self.OLD_SCOPE, {}, []), [])
+
+
+UNVERSIONED_CONTRACTS = ("# API contracts\n\n## Unversioned routes\n\n| Method | Path | Notes | Source |\n"
+                         "|---|---|---|---|\n| GET | `/health/live` | probe | `src/A.cs` |\n"
+                         "| GET | `/` | redirect | `src/A.cs` |\n\n## Table of contents\n")
+
+
+class FeGuidesNotes(unittest.TestCase):
+    """Unversioned routes in the contracts that nothing owns are for a person to confirm (D36)."""
+
+    def notes(self, files: dict[str, str], owners: list | None = None) -> str:
+        with tempfile.TemporaryDirectory() as folder:
+            for rel, text in files.items():
+                (Path(folder) / rel).parent.mkdir(parents=True, exist_ok=True)
+                (Path(folder) / rel).write_text(text, encoding="utf-8")
+            config = {"fe_guides": {"owners": owners}} if owners is not None else {}
+            return "\n".join(book.fe_guides_notes(Path(folder), config))
+
+    def test_unowned_unversioned_routes_are_for_a_person_to_confirm(self):
+        for owners in (None, [], [{"section": "Preferences", "guides": [], "reason": "x"}]):
+            with self.subTest(owners):
+                text = self.notes({book.CONTRACTS_DOC: UNVERSIONED_CONTRACTS}, owners)
+                self.assertTrue(text.startswith("CONFIRM "), text)
+                self.assertIn("2 unversioned route(s) nothing owns (/health/live, /)", text)
+
+    def test_an_owner_entry_a_titled_guide_or_no_such_routes_mean_nothing_to_confirm(self):
+        entry = [{"section": "Unversioned routes", "guides": [], "reason": "probes"}]
+        guides = book.FE_GUIDES_DIR + "/"
+        self.assertEqual(self.notes({book.CONTRACTS_DOC: UNVERSIONED_CONTRACTS}, entry), "")
+        self.assertEqual(self.notes({book.CONTRACTS_DOC: UNVERSIONED_CONTRACTS,
+                                     guides + "root.md": "# Unversioned routes — front-end integration guide\n"}), "")
+        self.assertEqual(self.notes({book.CONTRACTS_DOC: UNVERSIONED_CONTRACTS, guides + "probes.md":
+                                     "# Unversioned routes and probes — front-end integration guide\n"}), "",
+                         "a title that starts with the section's name owns it, as in check-fe-guides")
+        self.assertIn("2 unversioned route(s)", self.notes({book.CONTRACTS_DOC: UNVERSIONED_CONTRACTS, guides +
+                                                            "x.md": "# Unversioned routesx\n"}), "a whole word only")
+        self.assertEqual(self.notes({}), "", "no contracts (a stack without them)")
+        self.assertEqual(self.notes({book.CONTRACTS_DOC: "# API contracts\n\n## Unversioned routes\n\nNone.\n"}), "")
+
+    def test_a_base_line_owns_only_the_routes_it_covers(self):
+        files = {book.CONTRACTS_DOC: UNVERSIONED_CONTRACTS, book.FE_GUIDES_DIR + "/health.md":
+                 "# Health — front-end integration guide\n\n**Module:** Health · **Base:** `/health` · **Last checked "
+                 "against the code:** 2026-11-01 (abc1234)\n"}
+        self.assertIn("1 unversioned route(s) nothing owns (/)", self.notes(files))
 
 
 class Upgrade(unittest.TestCase):
@@ -947,6 +1051,12 @@ class Upgrade(unittest.TestCase):
 
     def test_init_stamps_the_installed_version(self):
         self.assertEqual(book.load_target_config(self.target)["book_version"], "1.0.0")
+
+    def test_the_report_asks_about_unversioned_routes_nothing_owns(self):
+        self.write(self.target, book.CONTRACTS_DOC, UNVERSIONED_CONTRACTS)
+        self.assertIn("CONFIRM docs/api/api-contracts.md lists 2 unversioned route(s) nothing owns", self.upgrade())
+        self.write(self.target, book.FE_GUIDES_DIR + "/probes.md", "# Unversioned routes\n\nThe probes.\n")
+        self.assertNotIn("unversioned route(s)", self.upgrade(), "a guide titled after the section owns it")
 
     def test_the_report_names_each_files_state_shows_diffs_and_writes_nothing(self):
         before = self.snapshot()

@@ -65,3 +65,8 @@ One line per fixed defect: id, what it was, and the commit or release that fixed
 - **D32** — the dotnet pack's contracts generator wrote "tenant scoping" whatever the project's `[book] scoping_word`. Fixed in v1.3.3.
 - **D33** — `check-fe-guides` read the contracts' first *Response schemas* section as every type changed, so every FE guide looked unchecked. Fixed in v1.3.3.
 - **D34** — a syntax error in a pack's Python file passed the boilerplate's self-tests, which never import the packs' tests. Fixed in v1.3.3.
+- **D35** — `check-fe-guides` named each unowned route twice when its row was reworded. Fixed in v1.3.4.
+- **D36** — `factory book upgrade` never asked about unversioned routes in the contracts that no FE guide or `[fe_guides] owners` entry owns. Fixed in v1.3.4.
+- **D37** — the ai-files owner tests edited the first `owners` list in `factory.toml`, which is the `[fe_guides]` list once that section has one. Fixed in v1.3.4.
+- **D38** — `/check-guides` asked a guide to name any dotted string assigned to a name, such as an application's name, as an error code. Fixed in v1.3.4.
+- **D39** — the book plugin was not pinned to a release, so each plugin release reached projects unreviewed, and no check tied the plugin's version to the template's. Fixed in v1.3.4.

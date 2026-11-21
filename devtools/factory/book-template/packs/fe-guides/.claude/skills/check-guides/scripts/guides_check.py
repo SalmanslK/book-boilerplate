@@ -55,8 +55,22 @@ STACK_DEFAULTS = {
 }
 OTHER_STACKS = {"source_files": ["src"], "route_calls": "", "module_sources": []}
 # An error code, quoted as a value in the source (`Error.Conflict("Widget.InUse", …)`, `Code = "Widget.InUse"`),
-# never a doc comment's `cref="…"`.
+# never a doc comment's `cref="…"`. Every match is a code the source has: a guide naming it is not wrong.
 CODE_USE = re.compile(r"(?:^\s*|\(\s*|(?<!cref)=\s*|,\s*|:\s*)\"([A-Z][A-Za-z]+\.[A-Z][A-Za-z]+)\"")
+# A guide must name a code only when it is not merely assigned to some name (D38): an assignment counts when the
+# name says it is a code (`ErrorCode`, `CONFLICT_CODES`) or is the code's own last part (`NotFound =
+# "Widget.NotFound"`); `ApplicationName = "Widget.App"` or a meter's name is a dotted constant, not a code.
+CODE_PLACED = re.compile(r"(?:^\s*|\(\s*|,\s*|:\s*)\"([A-Z][A-Za-z]+\.[A-Z][A-Za-z]+)\"")
+CODE_ASSIGNED = re.compile(r"\b(\w+)\s*=\s*\"([A-Z][A-Za-z]+\.([A-Z][A-Za-z]+))\"")
+
+
+def returned_codes(line: str) -> set[str]:
+    """The codes on a source line that a front end may meet, by the rule above."""
+    found = set(CODE_PLACED.findall(line))
+    for name, code, last in CODE_ASSIGNED.findall(line):
+        if re.search(r"codes?$", name, re.I) or name == last:
+            found.add(code)
+    return found
 GUIDE_CODE = re.compile(r"`([A-Z][a-z][A-Za-z]+\.[A-Z][A-Za-z]+)`")
 JSON_KEY = re.compile(r'"([a-z][A-Za-z0-9]*)"\s*:')
 # A section listing what the front end asked for and we do not build: its routes are meant not to exist.
@@ -424,17 +438,20 @@ def permission_mismatch(row: TableRow, route: Route) -> str | None:
 # ------------------------------------------------------------------------------------------- source
 
 
-def error_codes(repo: Path, ref: str, files: list[str]) -> dict[str, str]:
-    """{code: "path:line"} for every `Module.Code` the source passes as a value."""
+def error_codes(repo: Path, ref: str, files: list[str]) -> tuple[dict[str, str], set[str]]:
+    """{code: "path:line"} for every `Module.Code` the source passes as a value, and those of them a guide must
+    name (returned_codes)."""
     out = grep(repo, ref, files, "-n", "-E", r"\"[A-Z][A-Za-z]+\.[A-Z][A-Za-z]+\"")
     codes: dict[str, str] = {}
+    returned: set[str] = set()
     for line in out.splitlines():
         parts = line.split(":", 3)
         if len(parts) < 4 or parts[3].lstrip().startswith(("//", "#", "*")):
             continue
         for code in CODE_USE.findall(parts[3]):
             codes.setdefault(code, f"{parts[1]}:{parts[2]}")
-    return codes
+        returned |= returned_codes(parts[3])
+    return codes, returned
 
 
 def identifiers(repo: Path, ref: str, files: list[str]) -> set[str]:
@@ -552,7 +569,7 @@ def check(repo: Path, ref: str) -> dict:
     highest: dict[str, int] = {}
     for ident in ledgers.status:
         highest[ident[0]] = max(highest.get(ident[0], 0), int(ident[1:]))
-    codes = error_codes(repo, ref, config.source_files)
+    codes, returned = error_codes(repo, ref, config.source_files)
     head = git(repo, "rev-parse", "--short", ref).strip()
 
     # Who owns each route: the guide whose table lists it, else check-fe-guides.py's rule.
@@ -716,7 +733,8 @@ def check(repo: Path, ref: str) -> dict:
                               for r in routes.values() if not is_documented(r)]
     named = named_codes("\n".join(texts.values()))
     report["unnamed_error_codes"] = [f"{code} — {where}" for code, where in sorted(codes.items())
-                                     if code not in named and not internal(code, config.internal_codes)]
+                                     if code in returned and code not in named
+                                     and not internal(code, config.internal_codes)]
     report["stale_internal_codes"] = [f"{entry} — matches no code in the source ({reason})"
                                       for entry, reason in config.internal_codes if not any(
                                           internal(code, [(entry, reason)]) for code in codes)]

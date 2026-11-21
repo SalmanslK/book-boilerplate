@@ -283,11 +283,16 @@ def judge(root: Path, merge_base: str) -> list[str]:
     old_guides, new_guides = guides_at(root, merge_base), guides_at(root, "HEAD")
     listed = list(new_guides.values()) or list(old_guides.values())
     required: dict[str, set[str]] = {}
+    # A reworded row is two rows (the base's and HEAD's) for one route: name each unowned route once.
+    unowned: set[tuple[str, str]] = set()
     for heading, row in rows:
         contracts = new_contracts if heading in new_contracts.rows else old_contracts
         owners = owners_of(heading, row, contracts, listed, configured)
         route = " ".join(ROW.match(row).groups())
         if owners is None:
+            if (heading, route) in unowned:
+                continue
+            unowned.add((heading, route))
             problems.append(f"{CONTRACTS}: {route} changed in '{heading}', which no guide owns — add an owner: a guide "
                             f"titled '{heading}', a **Base:** line that covers it, or [fe_guides] owners in "
                             f"{FACTORY_TOML} with a reason")

@@ -744,7 +744,63 @@ def n16_skills(ctx: Context) -> list[Line]:
             enabled = False
         lines.append(Line(OK, "the book plugin is enabled", plugin) if enabled else
                      Line(MISSING, "the book plugin is enabled", f".claude/settings.json enabledPlugins {plugin}"))
+        if enabled:
+            lines.append(plugin_pin_line(settings, plugin, plugin_floor(ctx.manifest)))
     return lines
+
+
+TAG = re.compile(r"v(\d+\.\d+\.\d+)")
+COMMIT_SHA = re.compile(r"[0-9a-fA-F]{40}")
+
+
+def plugin_floor(manifest: dict) -> str:
+    """The manifest's `plugin_min`, "" when it has none; a malformed one stops the run, not a skipped check."""
+    floor = manifest.get("plugin_min")
+    if floor in (None, ""):
+        return ""
+    if not isinstance(floor, str) or not version_key(floor):
+        raise BookError(f"The template's manifest plugin_min {floor!r} is not a semver x.y.z.")
+    return floor
+
+
+def plugin_ref(settings: str, plugin: str) -> tuple[bool, str]:
+    """(whether .claude/settings.json has the plugin's marketplace entry, the `ref` its source pins, or "")."""
+    market = plugin.partition("@")[2]
+    try:
+        entry = ((json.loads(settings) or {}).get("extraKnownMarketplaces") or {}).get(market)
+    except (json.JSONDecodeError, AttributeError):
+        entry = None
+    if not isinstance(entry, dict):
+        return False, ""
+    source = entry.get("source")
+    return True, str((source.get("ref") if isinstance(source, dict) else "") or "")
+
+
+def plugin_pin_line(settings: str, plugin: str, plugin_min: str) -> Line:
+    """
+    The book plugin is pinned to a release (D39): a marketplace with no `ref`, or a branch, hands each new plugin
+    release to the project with no pull request, and a release older than the template's `plugin_min` lacks what
+    the template's files call.
+    """
+    name = "the book plugin is pinned to a release"
+    present, ref = plugin_ref(settings, plugin)
+    if not present:
+        return Line(CONFIRM, name, f".claude/settings.json has no extraKnownMarketplaces "
+                                   f"{plugin.partition('@')[2]} entry: say where the plugin comes from, pinned")
+    tag = TAG.fullmatch(ref)
+    if tag:
+        if version_key(plugin_min) and version_key(tag.group(1)) < version_key(plugin_min):
+            return Line(WRONG, name, f"{ref} is older than this template's plugin_min {plugin_min}: move `ref` to "
+                                     f"v{plugin_min} or later in a pull request")
+        return Line(OK, name, ref)
+    if COMMIT_SHA.fullmatch(ref):
+        return Line(CONFIRM, name, f"a commit, {ref[:12]}: check it holds plugin {plugin_min or 'a release'} or later")
+    if re.search(r"\d|/tags/", ref):
+        # A version-like name, a tag path or a short SHA pins something, just not what this check can read.
+        return Line(WRONG, name, f"pinned to {ref!r}, which is not a vX.Y.Z release tag or a full commit SHA - "
+                                 "pin a release tag (`\"ref\": \"vX.Y.Z\"`)")
+    return Line(WRONG, name, f"unpinned ({'ref ' + repr(ref) if ref else 'no ref'}): a plugin release reaches the "
+                             "project with no PR - pin it to a release tag (`\"ref\": \"vX.Y.Z\"`)")
 
 
 def n17_drive_folder(ctx: Context) -> list[Line]:
@@ -1457,6 +1513,7 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
                          "carry over by hand:\n" +
                          diff(rel, old_files[rel], new_files[rel], f"template {installed}", f"template {new_version}"))
     notes += plugin_notes(target, config, manifest, rows)
+    notes += fe_guides_notes(target, config)
     if unoffered:
         notes.append(f"{len(unoffered)} rename stub(s) not offered: the installed version had none of these old "
                      f"names ({', '.join(sorted(rel.split('/')[2] for rel in unoffered))})")
@@ -1512,6 +1569,72 @@ def is_rename_stub(content: bytes) -> bool:
 PLUGIN_OWNED = (".claude/skills/", ".claude/agents/")
 
 
+UNVERSIONED = "Unversioned routes"
+CONTRACTS_DOC = "docs/api/api-contracts.md"
+FE_GUIDES_DIR = "docs/fe-integration-guides"
+CONTRACT_ROW = re.compile(r"^\|\s*(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s*\|\s*`([^`]+)`")
+
+
+def unowned_unversioned(target: Path, config: dict) -> list[str]:
+    """
+    The paths under the contracts' *Unversioned routes* that nothing owns, as check-fe-guides judges an owner
+    (mirrored, since the target's copy of that check may be older): a `[fe_guides] owners` entry for the
+    section, a guide titled after it, or a guide whose **Base:** line covers the path.
+    """
+    try:
+        text = (target / CONTRACTS_DOC).read_text(encoding="utf-8")
+    except OSError:
+        return []
+    paths, inside = [], False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            inside = line[3:].strip() == UNVERSIONED
+        elif inside and CONTRACT_ROW.match(line):
+            paths.append(CONTRACT_ROW.match(line).group(1))
+    owners = (config.get("fe_guides") or {}).get("owners") or []
+    if not paths or any(isinstance(row, dict) and row.get("section") == UNVERSIONED for row in owners):
+        return []
+    bases: list[str] = []
+    for guide in sorted((target / FE_GUIDES_DIR).glob("*.md")):
+        if guide.name.startswith("_") or guide.stem == "api-conventions":
+            continue
+        body = guide.read_text(encoding="utf-8", errors="replace")
+        title = next((line[2:] for line in body.splitlines() if line.startswith("# ")), "")
+        # check-fe-guides' title match: the title, or one that starts with the section's name and a word.
+        title = re.split(r"\s+[-–—]\s+front-end integration guide", title, flags=re.I)[0]
+        title = re.sub(r"\s+", " ", re.sub(r"\s+[-–—]\s+", " — ", title.strip().lower()))
+        section = UNVERSIONED.lower()
+        if title == section or title.startswith(section + " ") or section.startswith(title + " — "):
+            return []
+        base = re.search(r"\*\*Base:\*\*(.*?)(?:·\s*\*\*|\n\s*\n|$)", body, re.S)
+        bases += re.findall(r"`(/[^`]*)`", base.group(1)) if base else []
+    return [path for path in paths if not any(base_covers(base, path) for base in bases)]
+
+
+def base_covers(base: str, path: str) -> bool:
+    """A guide's Base path leads `path`, segment by segment (a placeholder matches any one), as check-fe-guides."""
+    want, have = [p for p in base.split("/") if p], [p for p in path.split("/") if p]
+    return bool(want) and len(want) <= len(have) and all(
+        re.fullmatch(r"<[^>]+>|\{[^}]+\}", part) or part == actual for part, actual in zip(want, have))
+
+
+def fe_guides_notes(target: Path, config: dict) -> list[str]:
+    """
+    A Book whose contracts list unversioned routes that nothing owns (D36): upgrade never writes factory.toml,
+    and check-fe-guides asks for an owner the first time one of those rows changes - as every one did when the
+    generator gained the Source column. The skeleton's `[fe_guides] owners` example is commented out, since only
+    a dotnet Book's contracts have the section; a person confirms whether the front end calls any of them.
+    """
+    unowned = unowned_unversioned(target, config)
+    if not unowned:
+        return []
+    return [f"{CONFIRM} {CONTRACTS_DOC} lists {len(unowned)} unversioned route(s) nothing owns "
+            f"({', '.join(unowned[:3])}{' ...' if len(unowned) > 3 else ''}): check-fe-guides fails the next branch "
+            f"that changes one - if the front end calls none, add the skeleton's commented example to factory.toml "
+            f"[fe_guides] owners (`{{ section = \"{UNVERSIONED}\", guides = [], reason = \"...\" }}`) with this "
+            "project's reason, otherwise give them a guide"]
+
+
 def plugin_notes(target: Path, config: dict, manifest: dict, rows: list[tuple[str, str]]) -> list[str]:
     """
     What a Book moving onto the book plugin (v1.3.0) must do by hand, since upgrade never writes a file the
@@ -1521,6 +1644,7 @@ def plugin_notes(target: Path, config: dict, manifest: dict, rows: list[tuple[st
     plugin = manifest.get("plugin")
     if not plugin:
         return []
+    floor = plugin_floor(manifest)
     notes = []
     try:
         settings = json.loads((target / ".claude/settings.json").read_text(encoding="utf-8"))
@@ -1531,6 +1655,17 @@ def plugin_notes(target: Path, config: dict, manifest: dict, rows: list[tuple[st
         notes.append(f"{WRONG} .claude/settings.json does not enable {plugin}: the Book's skills and agents come "
                      "from it now - add its `extraKnownMarketplaces` and `enabledPlugins` entries from the "
                      "template's .claude/settings.json")
+    else:
+        # A pin older than this template's plugin_min lacks what the new files call (D39).
+        try:
+            _, ref = plugin_ref((target / ".claude/settings.json").read_text(encoding="utf-8"), plugin)
+        except OSError:
+            ref = ""
+        tag = TAG.fullmatch(ref)
+        if tag and version_key(floor) and version_key(tag.group(1)) < version_key(floor):
+            notes.append(f"{WRONG} .claude/settings.json pins the book plugin at {ref}, older than template "
+                         f"{manifest.get('version')}'s plugin_min {floor}: move its `ref` to v{floor} or later "
+                         "in the same pull request")
     if (config.get("review_scope") or {}).get("folder") == OLD_REVIEW_FOLDER:
         notes.append(f"{WRONG} factory.toml [review_scope] still reads {OLD_REVIEW_FOLDER}/: replace its `folder`, "
                      "`always` and `[review_scope.dimensions]` with the template's (the stack pack's "

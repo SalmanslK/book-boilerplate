@@ -7,8 +7,10 @@
     "book-plugins": {
       "source": {
         "source": "github",
-        "repo": "SalmanslK/book-plugin"
-      }
+        "repo": "SalmanslK/book-plugin",
+        "ref": "v0.4.0"
+      },
+      "autoUpdate": false
     }
   },
   "enabledPlugins": {

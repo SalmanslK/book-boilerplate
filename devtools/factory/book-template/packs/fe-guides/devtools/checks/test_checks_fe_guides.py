@@ -145,6 +145,8 @@ class FeGuidesTests(RepoTestCase):
         code, out = self.check()
         self.assertEqual(1, code)
         self.assertIn("which no guide owns — add an owner", out)
+        # The base's row and HEAD's are two rows for one route: it is named once.
+        self.assertEqual(1, out.count("GET /api/v1/date-formats changed in 'Preferences'"), out)
 
     def test_a_configured_owner_with_a_reason_owns_the_section(self):
         self.repo.write("devtools/factory/factory.toml",

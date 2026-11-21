@@ -64,7 +64,7 @@ class GuidesCheckTests(RepoTestCase):
         "| `PUT` | `/{id}` | edit | `204` |",
         "| `GET` | `/api/v1/farms/old` | `farms.view` | `200` |", "",
         "Send `name` and `search`; the lookup is `GET /lookup`, and `POST /api/v1/farms/import` imports.", "",
-        "Errors: `Farm.InUse`, `Farm.Vanished`.", "",
+        "Errors: `Farm.InUse`, `Farm.Vanished`, `Farm.Moved`, `Widget.App`.", "",
         "The default follows Q1.", "", "", "Q2 is still open.", "",
         "See [D9](../defects.md#d9). Orders move from D1 to D3.", "",
         "```json", '{ "name": "x", "legacyCode": 1 }', "```", "",
@@ -72,7 +72,11 @@ class GuidesCheckTests(RepoTestCase):
     SOURCE = {
         "src/App.API/Endpoints/Farms/FarmEndpoints.cs":
             'group.MapGet("/", List);\ngroup.MapPost("/", Add);\nreturn Error.Conflict("Farm.InUse", "in use");\n'
-            'return Error.NotFound("Farm.Hidden", "x");\nCode = "Outbox.Full";\n',
+            'return Error.NotFound("Farm.Hidden", "x");\nCode = "Outbox.Full";\n'
+            # A code held in a constant named for a code, or for its own last part, counts; a dotted name that is
+            # not a code does not, though a guide naming it is not wrong either (D38).
+            'public const string ErrorCode = "Farm.Taken";\nprivate const string ApplicationName = "Widget.App";\n'
+            'public const string Moved = "Farm.Moved";\nstatic readonly string Locked = "Farm.Locked";\n',
         "src/App.API/Configuration/Health.cs": 'app.MapGet("/health/live", () => Results.Ok());\n',
         "src/App.API/Configuration/Extra.cs": 'app.MapGet("/secret", () => Results.Ok());\n',
         "src/App.Application/Features/Farms/AddFarm.cs": "public sealed record AddFarm(string Name, int CountryId);\n",
@@ -140,10 +144,19 @@ class GuidesCheckTests(RepoTestCase):
                           "spells it"], [t for k, t in found if k == "F-UNKNOWN"])
         self.assertEqual(["error code `Farm.Vanished` — the source never returns it"],
                          [t for k, t in found if k == "E-UNKNOWN"])
-        self.assertEqual(["Farm.Hidden"], [line.split(" ")[0] for line in report["unnamed_error_codes"]],
-                         "Outbox.Full is internal")
+        self.assertEqual(["Farm.Hidden", "Farm.Locked", "Farm.Taken"],
+                         [line.split(" ")[0] for line in report["unnamed_error_codes"]],
+                         "Outbox.Full is internal; the guide names Farm.Moved and Widget.App (that an application's "
+                         "name is no code is test_a_guide_need_not_name_a_dotted_constant_that_is_no_code's)")
         self.assertEqual(1, len(report["stale_internal_codes"]))
         self.assertIn("Gone.Code", report["stale_internal_codes"][0])
+
+    def test_a_guide_need_not_name_a_dotted_constant_that_is_no_code(self):
+        script = self.script
+        self.assertEqual({"Widget.InUse"}, script.returned_codes('ERROR_CODE = "Widget.InUse";'))
+        self.assertEqual({"Widget.NotFound"}, script.returned_codes('const string NotFound = "Widget.NotFound";'))
+        self.assertEqual({"Widget.Gone"}, script.returned_codes('Error.NotFound(code: "Widget.Gone")'))
+        self.assertEqual(set(), script.returned_codes('const string ApplicationName = "Widget.App";'))
 
     def test_ids_are_judged_against_the_ledgers(self):
         found = self.findings(self.run_check(), "farms.md")
