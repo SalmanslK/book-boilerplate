@@ -1,0 +1,136 @@
+# The Book template: what `factory book init` creates in a repository and `factory book verify` expects.
+# The template is the boilerplate's own Book. S files (the same in every project but for names) are
+# copied from it with the [source] names replaced; T files (a required shape, the project's content)
+# start from skeletons/ with <!-- FILL --> slots; P folders are created empty with a .gitkeep. A pack
+# (packs/<pack>/) adds its files at their target paths, its skeletons and its folders, when the
+# parameter file's `stack` or `packs` names it.
+# Bump `version` (semver, the same as factory.toml's book_version) with any change here, in
+# skeletons/ or in packs/; a copied Book carries the version it came from.
+
+version = "1.3.0"
+
+# The guard hook's matcher must cover every tool it judges (N2).
+guard_matcher = ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Monitor", "Read",
+                 "Grep", "Glob", "NotebookRead", "mcp__.*[Dd]rive.*"]
+
+# The Book's skills and agents come from the book plugin, which every Book's settings enable (N16); a
+# project keeps no copy. `.claude/skills/` holds only its own skills: a pack's (deploy: deploy; fe-guides:
+# publish-guides, check-guides, release-notes) and, for v1.3.x, a stub per name the rename retired.
+plugin = "book@book-plugins"
+skills = []
+
+# P folders: kept in git even when empty (N19), created with a .gitkeep by init.
+folders = ["docs/plans", "docs/archive", "docs/Audit", "requirements/fsd"]
+
+# The names the template's own files carry: init replaces these with the new project's names.
+[source]
+name = "Boilerplate"
+title = "Book Boilerplate"
+slug = "boilerplate"
+env_prefix = "BOILERPLATE_"
+fe_drive_folder_id = "FE-DRIVE-FOLDER-ID"
+# Names that must not survive in another project's Book (N20): the template's own. Other projects' names
+# are a person's own list, `[book] foreign_names` in their private settings file, since naming them here
+# would publish them; verify looks for those everywhere, the template and names_exempt included. The
+# template's own name is also an English word ("Boilerplate and architecture"), so it is looked for only
+# as a name: a namespace or file (`Boilerplate.API` — a name ending in `.` needs a word after it), the
+# variable prefix, and the title.
+foreign_names = ["Boilerplate.", "BOILERPLATE_", "Book Boilerplate"]
+# Paths that hold those names on purpose: the template, the renamer, and their tests.
+names_exempt = ["devtools/factory/book-template/*", "devtools/factory/book.py", "devtools/factory/test_book.py"]
+
+# S files init copies from the boilerplate, the [source] names replaced (paths in names_exempt are
+# copied as they are).
+[copy]
+book = [
+  ".githooks/pre-commit", ".githooks/commit-msg", ".claude/settings.json", ".claude/skills/**/*",
+  "AGENTS.md", ".cursor/rules/docs.mdc", ".cursor/rules/tests.mdc", ".cursor/rules/boilerplate.mdc",
+  "docs/plans/_template.md",
+  "devtools/factory/factory.py", "devtools/factory/bitbucket.py", "devtools/factory/jira.py",
+  "devtools/factory/drive.py", "devtools/factory/deploy.py", "devtools/factory/book.py",
+  "devtools/factory/snapshots.py", "devtools/factory/fixture_project.py",
+  "devtools/factory/test_*.py", "devtools/factory/hooks/*", "devtools/factory/book-template/**/*",
+  "devtools/checks/check-book.py", "devtools/checks/check-rules.py", "devtools/checks/gen-task-rollup.py",
+  "devtools/checks/check-protected-paths.py", "devtools/checks/check-private-data.py",
+  "devtools/checks/check-commit-msg.py", "devtools/checks/check-code-rules.py", "devtools/checks/check-skills.py",
+  "devtools/checks/task-evidence.py", "devtools/checks/test-trend.py", "devtools/checks/ledger_ids.py", "devtools/checks/run-self-tests.py",
+  "devtools/checks/test_checks.py", "devtools/checks/ci-local.sh",
+]
+
+# T files: the target path = its skeleton in skeletons/. {{name}}-style values come from the parameter file.
+[skeletons.book]
+"CLAUDE.md" = "CLAUDE.md.tmpl"
+"AI-DEVELOPMENT-GUIDE.md" = "AI-DEVELOPMENT-GUIDE.md.tmpl"
+"README.md" = "README.md.tmpl"
+".gitignore" = "gitignore.tmpl"
+".gitattributes" = "gitattributes.tmpl"
+"docs/CLAUDE.md" = "docs-CLAUDE.md.tmpl"
+"tests/CLAUDE.md" = "tests-CLAUDE.md.tmpl"
+"docs/system-overview.md" = "system-overview.md.tmpl"
+"docs/architecture.md" = "architecture.md.tmpl"
+"docs/project.md" = "project.md.tmpl"
+"docs/open-questions.md" = "open-questions.md.tmpl"
+"docs/defects.md" = "defects.md.tmpl"
+"docs/qa-artifact-test-suite.md" = "owned.md.tmpl"
+"docs/archive/defects-closed.md" = "archive.md.tmpl"
+"docs/archive/questions-resolved.md" = "archive.md.tmpl"
+"docs/archive/project-history.md" = "archive.md.tmpl"
+"docs/archive/requirements-history.md" = "archive.md.tmpl"
+"docs/archive/plans-history.md" = "archive.md.tmpl"
+"docs/archive/architecture-history.md" = "archive.md.tmpl"
+"docs/archive/fe-guides-history.md" = "archive.md.tmpl"
+"docs/archive/qa-suite-history.md" = "archive.md.tmpl"
+"requirements/read-me.txt" = "requirements-index.txt.tmpl"
+"requirements/fsd/read-me.txt" = "requirements-linked.txt.tmpl"
+"devtools/README.md" = "devtools-README.md.tmpl"
+"devtools/factory/factory.toml" = "factory.toml.tmpl"
+"devtools/checks/private-data-accepted.txt" = "private-data-accepted.txt.tmpl"
+
+# The packs. Each one's files are packs/<pack>/<target path>; `skeletons` and `folders` as above.
+# `factory-append.toml` in a pack is appended to factory.toml when init created it.
+# A pack's `instructions` (its nested CLAUDE.md files) and `owners` (its owner documents) are rows init
+# writes into the root CLAUDE.md's two tables, the names replaced, so a new Book lists what it installed.
+[packs.dotnet]
+skeletons = {}
+folders = []
+instructions = [
+    { file = "src/CLAUDE.md", says = "the code rules: dependencies, structure, style, behaviour, security, database" },
+    { file = "src/Boilerplate.Persistence/CLAUDE.md", says = "migrations, the idempotent script, `dotnet ef` safety" },
+    { file = "src/Boilerplate.API/CLAUDE.md", says = "endpoints, regenerating the API contracts, settings" },
+]
+# Its review dimensions (B1-B11 in `.claude/review/`, and its review-scope.toml) take the place of the
+# plugin's core B0 file.
+
+[packs.pytest]
+skeletons = {}
+folders = []
+
+[packs.deploy]
+skeletons = { "docs/e2e-testing.md" = "owned.md.tmpl", "docs/dev-smoke-test-suite.md" = "owned.md.tmpl" }
+folders = []
+owners = [
+    { topic = "Verifying a deployed environment, and the last run's result", owner = "`docs/e2e-testing.md`" },
+    { topic = "Which rows of QA's smoke checklist the smoke tests prove", owner = "`docs/dev-smoke-test-suite.md`" },
+]
+
+[packs.bitbucket]
+skeletons = {}
+folders = []
+
+[packs.fe-guides]
+skeletons = { "docs/fe-integration-guides/api-conventions.md" = "api-conventions.md.tmpl", "docs/api/fe-api-coverage.md" = "owned.md.tmpl", "docs/ui-standard.md" = "ui-standard.md.tmpl" }
+folders = ["docs/fe-integration-guides", "docs/api", "docs/release-notes"]
+owners = [
+    { topic = "How the front end calls one **built** module", owner = "its guide in `docs/fe-integration-guides/`" },
+    { topic = "What every module's API does the same way (auth, errors, paging)", owner = "`docs/fe-integration-guides/api-conventions.md`" },
+    { topic = "Which endpoints the front end requires, and whether we have them", owner = "`docs/api/fe-api-coverage.md`" },
+    { topic = "What one QA build delivered (a dated snapshot)", owner = "`docs/release-notes/`" },
+    { topic = "How a screen works where the requirements and the wireframes are silent", owner = "`docs/ui-standard.md`" },
+]
+# Rules for the root CLAUDE.md's Features list, which name this pack's own check.
+features = [
+    """- **An API change reaches the guide of the module it changed, in the same branch**: each changed route in
+  `docs/api/api-contracts.md` has an owner guide — by its title, its **Base:** path, or `[fe_guides] owners`
+  in `devtools/factory/factory.toml` with a reason — and that guide's *Last checked against the code* line
+  moves *[enforced: `check-fe-guides.py`, CI]*.""",
+]

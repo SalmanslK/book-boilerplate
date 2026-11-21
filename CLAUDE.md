@@ -1,194 +1,197 @@
 # Book Boilerplate
 
-<!-- FILL: one paragraph — what this repository is, its stack, and how to build it.
-Link to the product overview and the architecture guide once they exist. -->
+The **Book** as a starting point: the documents that say what a project builds, why, how and what is
+done, the checks that keep them true, the skills Claude Code works by, and the guard that refuses what
+these rules say never to do. A project copies it (`factory book init`) and fills it in. This
+repository is its own first Book: its product is the boilerplate, its only code is the Python tooling
+in `devtools/`, and its stack is `none`.
+
+What it is: [docs/system-overview.md](docs/system-overview.md). How it is built and **why each rule
+below exists**: [docs/architecture.md](docs/architecture.md). Start here: [docs/README.md](docs/README.md).
 
 ## How these instructions are organised
 
-This file holds the rules that apply everywhere. **Nested `CLAUDE.md` files load when
-you work in their folder — read the one for where you are before changing anything
-there:**
+This file holds the rules that apply everywhere. **Two more load when you work in their folder — read
+the one for where you are before changing anything there:**
 
 | Folder | Its rules |
 |---|---|
-| `docs/` | [`docs/CLAUDE.md`](docs/CLAUDE.md) — writing docs: current state vs history, defects, questions, plans, generated files |
-| <!-- FILL: folder --> | <!-- FILL: its CLAUDE.md, and what it covers (e.g. migrations, endpoints). The install writes the testing rules, tests/CLAUDE.md, in each stack's test folder: give each a row. --> |
+| `docs/` | [`docs/CLAUDE.md`](docs/CLAUDE.md) — writing docs: current state vs archive, defects, questions, plans |
+| `tests/` | [`tests/CLAUDE.md`](tests/CLAUDE.md) — what the tooling's self-tests must prove, and how to run them |
 
-*[enforced: X]* marks a rule a test or check fails the build on; it is written here
-so you do not trip it, not because anyone has to police it.
+A stack pack adds its own (the dotnet pack: `src/CLAUDE.md` and one per project folder); they live under
+`devtools/factory/book-template/packs/` until `factory book init` copies them, and are not rules here.
+
+*[enforced: X]* marks a rule a test or check fails the build on; it is written here so you do not trip
+it, not because anyone has to police it. The table of every one, and whether it is intact:
+[devtools/README.md](devtools/README.md#enforced-rules).
+
+**A guard hook reads every file read, file write and shell command in a Claude Code session** and
+refuses what this file says never to do: changing `requirements/` snapshots or generated docs; pushing
+or committing to a protected branch; deleting a branch; skipping hooks; secrets or personal paths in
+written content; reading or printing [private settings](#private-settings) and credentials. It asks
+before touching the files that steer the AI, its own files and Claude Code's settings. A refusal that is
+wrong is a guard bug — report it; never route around it. Its rules are `[guard]` in
+`devtools/factory/factory.toml`.
+
+**Blocked means stop.** When the guard, a permission, or an unreachable source blocks something the
+task needs, stop at that step and tell the person what was blocked, why, and what would unblock it.
+Never carry on with what you could not read, and never report a check you could not make as passed.
+
+## Working with AI here
+
+- **One unit of work per session** — a plan, a task, a review, an audit — then a fresh session.
+  **`/book:self-review` and `/book:peer-review` run in a fresh session or a subagent**, never in the session that
+  wrote the change.
+- **"What is left" comes from the Book, not the conversation:** `project.md` Part 1 and each plan's
+  Tasks, which `/book:progress` brings up to date.
+- **Write for the reader.** Answer first, then only what they need. For a non-engineer: plain words, at
+  most five points, and no id, file path or term left unexplained.
 
 ## Layout
 
 | Path | Contains |
 |------|----------|
-| <!-- FILL: source folder --> | All application code. |
-| <!-- FILL: tests folder --> | All tests. |
-| `docs/` | The documentation — owners in [Where knowledge lives](#where-knowledge-lives). |
-| `requirements/` | **Read-only.** The client's or product's requirement documents, as snapshots. The guard refuses edits (`[guard].read_only` in `devtools/factory/factory.toml`), and a commit that changes one is refused *[enforced: `check-protected-paths.py`, pre-commit]*. |
-| `devtools/factory/` | The AI factory: the referee, the guard, its config and step prompts. |
+| `docs/` | The documentation — owners in [Where knowledge lives](#where-knowledge-lives); closed history in `docs/archive/`. |
+| `requirements/` | **Read-only.** The boilerplate's own specification as snapshots: `fsd/` holds every revision as `- V<n>.md` — **build from the highest number** (a lexical sort puts V9 above V15). The index is `requirements/read-me.txt`. Only `/book:check-sources` adds to it *[enforced: `check-protected-paths.py`, pre-commit]*. |
+| `devtools/checks/` | The checks the hooks and the local CI run, and their self-tests. |
+| `devtools/factory/` | The Book CLI (`factory.py`), the guard (`hooks/`), and the template `factory book init` copies (`book-template/`, with the stack and host packs). |
+| `.claude/` | The skills, the two Book agents, and the hook settings. |
+| `tests/` | Only [`tests/CLAUDE.md`](tests/CLAUDE.md): the self-tests sit beside the code they test. |
+
+## Branches
+
+- `main` is reached by pull request (here: a reviewed local merge) only — **never commit or push to it**.
+- Cut work branches from `origin/main` **with `--no-track`**, so a push cannot land on `main`
+  *[enforced: guard]*.
+- **A doc change the work causes stays on the work's branch.** A general refresh goes on a
+  `chore/docs-<slug>` branch of its own ([which is which](docs/CLAUDE.md#which-branch-a-doc-change-goes-on)).
 
 ## Where knowledge lives
 
-**One topic, one owner; everything else links to it.** Before writing anything down,
-find its owner here. Every doc in `docs/` and at the root has a row or a folder here
-*[enforced: `devtools/checks/check-book.py`]*. How to write each one: [`docs/CLAUDE.md`](docs/CLAUDE.md).
+**One topic, one owner; everything else links to it.** Before writing anything down, find its owner
+here. Every doc in `docs/` and at the root has a row or a folder here *[enforced: `check-book.py`]*.
+How to write each one: [`docs/CLAUDE.md`](docs/CLAUDE.md).
 
 | Topic | Owner |
 |---|---|
-| **The requirements** — read-only snapshots, one file per revision; build from the highest | `requirements/` ([`read-me.txt`](requirements/read-me.txt)) |
-| What the product is, its vocabulary, users and flows | `docs/system-overview.md` |
-| Architecture, conventions, and **why** each rule exists | `docs/architecture.md` |
-| How a screen looks and works where the requirements and wireframes do not say | `docs/ui-standard.md` |
-| Feature status and phases; the latest requirements revision's changes; the task roll-up (**generated** from the plans by `devtools/checks/gen-task-rollup.py`) | `docs/project.md` |
-| Requirement ↔ plan ↔ code ↔ test traceability — written only by `/fsd-audit` | `docs/Audit/spec-traceability.md` |
+| The Book's front page: the reading order of the owner documents | `docs/README.md` |
+| What the boilerplate is, its vocabulary, users and flows | `docs/system-overview.md` |
+| Architecture, conventions, naming, trade-offs, and **why** each rule exists | `docs/architecture.md` |
+| Feature status, phases, dependencies; the latest specification revision's changes | `docs/project.md` |
 | **Rules decided for questions the requirements leave open** — *Resolved*, by topic | `docs/open-questions.md` |
 | **A defect**: what is wrong, and what happened to it | `docs/defects.md` |
-| One feature's design, and its tasks in build order with their role and status | its plan in `docs/plans/`, from `docs/plans/_template.md` — its Tasks section |
-| One factory run: intent, spec, design, plan, evidence, review | its file in `docs/factory/runs/` — created by `factory start`, never by hand |
-| Every factory run in one table — **generated** | `docs/factory/runs/INDEX.md` (`factory index`) |
-| <!-- FILL: generated docs (API contracts, schema) --> | <!-- FILL: path — **generated**, and the command that writes it --> |
-| Closed history — fixed defects, answered questions, build logs | `docs/archive/` — **never a current rule** |
+| One feature's design, and its tasks in build order with their role and status | its plan in `docs/plans/` — its Tasks section |
+| Which QA test cases are ours, and whether we satisfy them | `docs/qa-artifact-test-suite.md` |
+| Specification ↔ plan ↔ code ↔ test traceability — written only by `/book:fact-check` | `docs/Audit/` |
+| Closed history — fixed defects, answered questions, earlier revisions | `docs/archive/` — **never a current rule** |
 | Rules to follow while working | this file and the nested ones |
-| How to run and build it | `README.md` |
+| How the team uses AI tools | `AI-DEVELOPMENT-GUIDE.md` (a map, not a second rulebook) |
+| The pointer other AI tools read first | `AGENTS.md` |
+| How to install and use the boilerplate | `README.md` |
+| The tooling — checks, the Book CLI, the guard, the template and its packs; the enforced-rules table | `devtools/README.md` |
 
-**Is X decided?** Look under *Resolved* in `open-questions.md`, then the feature's
-plan. A decision found only in the archive, a chat or a PR thread is not in force until
-it is in one of those.
+**Is X decided?** Look under *Resolved* in `open-questions.md`, then the feature's plan. A decision found
+only in the archive, a chat or a PR thread is not in force until it is in one of those.
 
 ## Features
 
-- **The requirements are the source of truth and win every conflict.**
-  <!-- FILL: name the spec source (a document, a folder, a ticket system) and which
-  revision is authoritative. --> Where they are silent, the supporting documents are
-  the best evidence. A design showing what the requirements do not specify is not a
-  requirement. Where the requirements contradict themselves, ask.
-- **Every feature gets a plan before it gets code**, from `docs/plans/_template.md`.
-- **The plan and the code stay in sync, in the same commit.** A deviation from an
-  approved plan is **discussed before it is built**, not found in the diff.
-- **A question the requirements do not answer goes to `open-questions.md` with a
-  recommendation** — never into a plan or a spec as a guess.
-- **Every confirmed defect gets a `defects.md` row the day it is found**, and its id
-  goes in the fixing commit's message. A missed requirement in a completed feature is
-  a defect row, not a silent rewrite.
+- **The specification is the source of truth and wins every conflict**: the highest
+  `requirements/fsd/` revision. Where it is silent, ask; a question goes to `open-questions.md` with a
+  recommendation — never into a plan as a guess.
+- **Every feature gets a plan before it gets code**, from `docs/plans/_template.md`, with a row in
+  [`project.md` Part 1](docs/project.md#part-1--features-and-phasing).
+- **The plan and the code stay in sync, in the same commit.** A deviation from an approved plan is
+  discussed before it is built.
+- **Update a feature's status in `project.md` Part 1, and a task's in its plan's Tasks, when it changes.**
 - **Stay inside the feature's scope.** A drive-by fix is its own commit, tracked.
-- **Change behaviour, fix the doc that owns it in the same commit.** Wrong
-  documentation is worse than none.
+- **Change behaviour, fix the doc that owns it in the same commit.** Wrong documentation is worse than none.
+- **Every confirmed defect gets a `defects.md` row the day it is found**, and its id goes in the fixing
+  commit message *[enforced on `fix/*` branches: `commit-msg` hook]*.
 
 ## Coding principles (every stack)
 
-These hold in every language and framework, and the reviewer checks each change against
-them: a breach is a finding, not a matter of taste. Why each exists:
-[`docs/architecture.md`](docs/architecture.md#coding-principles-every-stack).
+These hold in every language, and the reviewer checks each change against them: a breach is a finding,
+not a matter of taste. Why each exists: [`docs/architecture.md`](docs/architecture.md#coding-principles-every-stack).
 
-- **Less code is better code, inside the architecture's boundaries.** Build what the
-  requirement asks and nothing speculative: no interface or base class without a second
-  implementer in sight, no option or setting nobody asked for, no wrapper that only
-  renames a library call. Delete dead code and commented-out code. Shorter code that
-  crosses a layer boundary is not better: the boundary wins.
-- **Neat and understandable.** Names say what a thing is or does, so the code needs few
-  comments; rename unclear code rather than explain it. Short functions with one job
-  each, no deep nesting (return early). No magic numbers: a named constant says what one
-  means.
-- **Efficient by design.** No query or call inside a loop; read only the columns and
-  rows needed; page long lists; do once what can be done once. Beyond that, measure
-  before tuning: clarity wins over a micro-optimisation nobody measured.
-- **Reusable, without being clever.** Shared logic lives in one place, named for what it
-  does. Write it twice before you abstract it; abstract it the third time. Prefer a
-  maintained library over writing your own, kept behind one file.
-- **The basics, always:** validate input at the boundary and trust nothing from outside;
-  no secrets in code; immutable by default; one responsibility per class or module;
-  every change ships with tests that prove it.
-
-**The rules that make those concrete**, in every stack. Where a regular expression holds
-a rule's plain form, the stack's pack (`[[code_rules]]` in `devtools/factory/factory.toml`)
-refuses it at every commit; the rest are the stack's own tests and lint, or review.
-Why each: [`docs/architecture.md`](docs/architecture.md#the-rules-every-stack-keeps).
-
-- **Time comes from an injected clock**, never the system clock read in place *[enforced: `check-code-rules.py`, pre-commit]*.
-- **Never block on asynchronous work** — await it all the way up; the stack's pack refuses the blocking calls where its language has them.
-- **Long-running work can be cancelled**: the caller's cancellation signal is passed on to the last call, never replaced by an empty one (the .NET pack refuses `CancellationToken.None`).
-- **Catch only the failures you can handle and let faults surface** — no catch-all, no empty catch *[enforced: `check-code-rules.py`, pre-commit]*.
-- **Log through the logger, with named fields, never a stray print** *[enforced: `check-code-rules.py`, pre-commit]*; never a secret, token or personal data in a log.
-- **Name things for what they are** — never a Helper or Utility type *[enforced: `check-code-rules.py`, pre-commit]*, nor a Manager or Processor.
-- **Say "exactly one" when you mean it**: take the single match and fail on two; never an arbitrary first — order the query when several are legitimate.
-- **Dependencies point inward, and the boundaries are checked** by the stack's own layer test or import rule, never by review alone.
-- **Configuration is typed and validated at start**: a missing setting stops startup, and a placeholder value is recognisable (it starts with `REPLACE`).
-- **A string that must match another is one constant beside the code that owns it** — a route, a tag, a key, a message — never repeated, never a global constants file.
+- **Less code is better code, inside the architecture's boundaries.** Build what the requirement asks
+  and nothing speculative. Delete dead and commented-out code. Shorter code that crosses a layer
+  boundary is not better: the boundary wins.
+- **Neat and understandable.** Names say what a thing is or does; short functions with one job each; no
+  deep nesting; no magic numbers.
+- **Efficient by design.** No query or call inside a loop; page long lists; measure before tuning.
+- **Reusable, without being clever.** Shared logic lives in one place. Write it twice before you
+  abstract it; prefer a maintained library over writing your own.
+- **The basics, always:** validate input at the boundary; no secrets in code; immutable by default; one
+  responsibility per module; every change ships with tests that prove it.
+- **Time comes from an injected clock; never block on asynchronous work; catch only the failures you
+  can handle; log through the logger, never a stray print; never a Helper or Utility type.** Where a
+  regular expression holds one of these, the stack's pack writes it into `[[code_rules]]` in
+  `devtools/factory/factory.toml`, and the lines a commit adds are refused when they break one
+  *[enforced: `check-code-rules.py`, pre-commit]*. The boilerplate itself has none (stack `none`).
 
 ## Code rules
 
-<!-- FILL: the project's code rules — layering, naming, error handling, dependency
-policy, style. Say which ones a test or check enforces, and mark them *[enforced: X]*.
-Keep the "why" for each in the architecture guide, not here. -->
+Four hold wherever you work:
 
-- **Never commit real secrets**, a path inside someone's home folder, or a person's
-  email or machine name *[enforced: `check-private-data.py`, pre-commit]*.
+- **Never commit a real secret** (a placeholder starts with `REPLACE`), nor put one in a commit message,
+  branch name or test fixture.
+- **Never log** passwords, tokens, reset or invitation links, one-time codes, connection strings, or
+  customer-identifying data.
+- **The tooling is Python 3.11+, standard library only**, so a Book needs nothing installed but Python
+  and git.
+- **A tool reads the project from `devtools/factory/factory.toml`, never from a name in its code**: a
+  project name, path or key written into a script is a leftover `factory book verify` reports.
 
-## The AI factory
+## Private settings
 
-A backlog item goes through the factory as a **run**: one branch, one run file in
-`docs/factory/runs/`, and the steps `devtools/factory/factory.toml` lists. `/factory`
-drives a run in your own session; `factory drive` drives it unattended.
+**Nothing personal or secret goes in the repository** — no credential or token, no path inside
+someone's home folder, no person's email or machine name *[enforced: the guard on every write,
+`check-private-data.py` in pre-commit and CI]*.
 
-- **The guard** (`devtools/factory/hooks/guard.py`, wired in `.claude/settings.json`)
-  reads every file write and shell command before it runs and refuses what this file
-  says never to do — the rules are `[guard]` in `factory.toml`. Some writes it **asks**
-  about instead: the factory itself, settings, CI and git hooks.
-- **Never route around a guard refusal** — not with another tool, a shell redirect, a
-  script or a renamed path. A refusal means stop: fix the approach, or ask the person.
-  The guard is a first layer; CI re-checks what reaches a pull request.
-- **The referee** (`devtools/factory/factory.py`) checks each step **itself** and
-  advances only on a pass. A session's word that a step is done is never taken.
-- **Gates are a person's.** The spec gate, the design gate (High tier only) and the
-  merge gate are decided by people: `factory approve` from a terminal that is not a
-  Claude Code session (or the Factory app), and at the merge gate the pull request
-  approved by someone other than its author — or, in a project with no remote
-  (`check = "local-approval"`), a person's `factory approve merge`.
-  An agent never runs `factory approve`, `unlock`, `abandon` or `open-pr` *[enforced: guard]*.
-- **Tests are proven red, then locked.** A change criterion's tests must fail before the
-  build; then they are locked by hash, and only a person's `factory unlock` releases
-  one *[enforced: guard]*. A criterion marked *(guard)* pins behaviour that must not
-  break: its tests pass before and after.
-- **A run is measured by its branch's own commits** since its base
-  (`git log --first-parent --no-merges <base>..HEAD`) — merges of the base branch are
-  not the run's change.
-- **Escalate instead of guessing.** A session that cannot make progress writes an
-  `## Escalation` section in the run file saying what a person must decide, and stops.
-- **A defect a run introduced** says *Introduced by run [R-nnn](factory/runs/R-nnn.md)*
-  in its defect row, so `factory report` can count what escaped each run.
-
-## Git
-
-- **Protected branches are reached by pull request only — never push or commit to
-  them** *[enforced: guard]*: <!-- FILL: e.g. `main`, `dev` — the same list as
-  `protected_branches` in `factory.toml` -->.
-- **Cut work branches from the base with `--no-track`**
-  (`git checkout --no-track -b <type>/<slug> <base_ref>`), so a bare `git push` cannot
-  land on the base.
-- **Never delete a branch, never force-push or rewrite history on a shared branch**
-  *[enforced: guard]*.
-- Commit messages are imperative, with **no AI or tooling attribution and no trailer
-  lines** *[enforced: `commit-msg` hook]*. On a `fix/*` branch the message names the
-  defect or question id, or the tracker key, it fixes.
-- **The git hooks in `.githooks/` run on every commit**: the install set
-  `core.hooksPath`, and a new clone runs `git config core.hooksPath .githooks` once.
-  **Never skip them** (`--no-verify`) *[enforced: guard]*: a hook that refuses names
-  what to fix.
-- <!-- FILL: ticket keys in branch names and PR titles, if the team uses a tracker. -->
-- **A pull request description has a summary and a test plan.** `factory pr-body`
-  writes one from a run.
+- **A person's own settings live in their private settings file**, `~/.boilerplate/local.toml` (or
+  `BOILERPLATE_LOCAL_SETTINGS`), outside every repository; the tooling reads only the keys
+  [`devtools/README.md`](devtools/README.md#private-settings) lists.
+- **A session never reads, prints or copies them** — the private file, a credential store, a command
+  that dumps one, or a secret variable *[enforced: guard]*. Check that a secret is set with `test -n`;
+  never print it.
+- **A session reaches a service through a tool that holds the credential, never with it**: Bitbucket
+  through `factory pr`, Jira through `factory jira`, read only.
 
 ## Building and testing
 
-- **Build before committing**: <!-- FILL: the build command — the same as
-  `[commands].build` in `factory.toml` -->.
-- **Test what the change can break, not everything**: the fast suites always, and the
-  integration tests of the modules you touched. Run the full suite when the change is
-  cross-cutting. <!-- FILL: the test commands, and what counts as cross-cutting here. -->
-- **Report what ran** — the command or filter, and the executed, passed, failed and
-  **skipped** counts. A suite that skips because a database or service is missing, or a
-  filter that matches nothing, looks like a pass; neither is one.
-  `devtools/checks/check-test-results.py` fails a results file that skipped, ran nothing
-  or is missing.
-- Every feature ships tests that prove its behaviour. **Never skip, delete or weaken a
-  failing test.**
+- **The self-tests are the build.** Before committing, run the suites the change touches:
+  `python devtools/checks/run-self-tests.py <folder>` for `devtools/factory/hooks`, `devtools/factory`
+  and `devtools/checks` ([how](tests/CLAUDE.md)). A change to the guard or a shared check runs all three.
+- **Before a pull request, run `sh devtools/checks/ci-local.sh`** on the commit and paste the *Local CI*
+  section it prints into the description *[enforced: `factory pr open`, local CI]*. It runs the
+  repository checks, the self-tests, and `[commands]` from `factory.toml` (an empty command is N/A).
+- **Report what ran** — the folder, and the executed, passed and skipped counts. A suite that finds no
+  tests, or skips one, fails.
+- Never skip, delete or weaken a failing test.
+
+## Git
+
+- **Never delete a branch** — say it looks done, and stop there.
+- **Never force-push or rewrite history on a shared branch.**
+- **Jira-tracked work carries the key right after the type**: `fix/PROJ-310-short-slug`. Our own `D`/`Q`
+  ids go in commit messages.
+- **A change to the files that steer the AI** — the `CLAUDE.md` files, `.claude/`, the AI tools, the
+  guard, the checks, the hooks — **is made or approved by an owner** (`[ai_files]` in
+  `devtools/factory/factory.toml`) *[enforced: `factory ai-files`]*. Its pull request names them on an
+  *AI files* line, which the local CI run prints, so the approval is asked for before the merge
+  *[enforced: `factory pr open` checks the description's AI files line]*.
+- Run `/book:self-review` before opening a PR. `factory pr open` refuses a commit without a recorded READY
+  verdict.
+- **A PR description has a summary, a test plan, a *Local CI* section and one Effort line** *[enforced:
+  `factory pr open` checks the description before it opens the PR; `factory pr-check` reads it back]*.
+- Commit messages are imperative, with no AI or tooling attribution and no trailer lines *[enforced:
+  `commit-msg` hook]*.
+
+## Skills
+
+Which documentation skill compares what: [the AI guide](AI-DEVELOPMENT-GUIDE.md#which-docs-skill).
+All of them treat `requirements/` as read-only; only `/book:check-sources` adds a new snapshot file.
+`/book:setup` verifies a Book and creates what is absent. `/book:check-docs` owns
+`references/comparison-checklist.md`, which `/book:update-docs` shares — add a new concern there.
+`/book:peer-review` posts to an open PR only after asking and never approves, merges or declines.

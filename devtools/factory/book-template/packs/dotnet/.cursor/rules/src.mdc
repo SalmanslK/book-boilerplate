@@ -1,0 +1,7 @@
+---
+description: Code rules - dependencies, structure, style, behaviour, security, database
+globs: src/**
+alwaysApply: false
+---
+
+Read and follow [`src/CLAUDE.md`](../../src/CLAUDE.md) before changing or reviewing anything under `src/`. It holds the code rules; the root `CLAUDE.md` still applies.

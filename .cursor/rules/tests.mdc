@@ -1,0 +1,7 @@
+---
+description: Test rules: what a change must prove, and how the self-tests run
+globs: tests/**
+alwaysApply: false
+---
+
+Read and follow [`tests/CLAUDE.md`](../../tests/CLAUDE.md) before changing anything under `tests/`. It holds the rules for this folder; the root `CLAUDE.md` still applies.

@@ -1,0 +1,59 @@
+
+# [[code_rules]] - the dotnet pack: the C# forms of rules every stack can keep (check-code-rules.py).
+# The names (IEmailSender, IFileStore, the folders) are a starting point: set them to the project's own.
+# An `allowed` entry is a place the project keeps on purpose, with its count and its reason.
+
+[[code_rules]]
+id = "anonymous-route"
+pattern = '\.AllowAnonymous\(\)'
+files = ["src/**/*.cs"]
+exempt = []
+skip_lines = '^\s*(?://|/?\*)'
+# Every route that opts out of sign-in, file by file: `{ file = "...", count = n, reason = "..." }`.
+allowed = []
+message = "a minimal-API route open without sign-in (an [AllowAnonymous] attribute is not matched) is on the allow-list with its reason, or it requires a permission (src/CLAUDE.md, Behaviour: authorization is default-deny)."
+
+[[code_rules]]
+id = "handler-side-effect"
+pattern = '\b(?:IEmailSender|HttpClient|IHttpClientFactory|IFileStore)\b'
+files = ["src/**/EventHandlers/**/*.cs", "src/**/*EventHandler.cs"]
+exempt = []
+skip_lines = '^\s*(?://|/?\*)'
+allowed = []
+message = "an event handler sends nothing outside the database; the outbox delivers after the commit (src/CLAUDE.md, Behaviour: no external side effect in a domain event handler; email goes through the outbox)."
+
+[[code_rules]]
+id = "config-by-literal"
+pattern = '\b_?[Cc]onfig(?:uration)?\[\s*"|\.GetValue<[^>]*>\(\s*"|\.GetSection\(\s*"|\.GetConnectionString\(\s*"'
+files = ["src/**/*.cs"]
+exempt = []
+skip_lines = '^\s*(?://|/?\*)'
+# The reads that run before options exist (registration time), file by file, with their reason.
+allowed = []
+message = "read settings through a bound, validated options class, never by a string key (src/CLAUDE.md, Structure: no magic-string configuration reads)."
+
+[[code_rules]]
+id = "pending-model-test"
+pattern = '\.HasPendingModelChanges\(\)'
+files = ["tests/**/*.cs"]
+exempt = []
+skip_lines = '^\s*(?://|/?\*)'
+require = 1
+# Judged once the project has a migration.
+require_when = ["src/**/Migrations/*.cs"]
+message = "a test must fail when the EF model has changes no migration holds: assert `context.Database.HasPendingModelChanges()` is false (the Persistence project's CLAUDE.md, Schema changes)."
+
+# check-dotnet.py - the checks that need C#'s shape, not one line: a validator per list of references,
+# options validated on start with a validator behind them, and the shape of a unique index.
+[dotnet_checks]
+# The property every tenant-scoped entity carries; a unique index on such an entity leads with it.
+# Empty: that leg is not judged, and the check says so.
+tenant_key = ""
+# The column a soft-deletable entity maps; its unique indexes filter on "<column> IS NULL".
+soft_delete_column = "deleted_at"
+# Options classes registered without a validator on purpose: { type = "...", reason = "..." }.
+options_unvalidated = []
+# Unique indexes kept global or unfiltered on purpose: { index = "Entity(Column, ...)", reason = "..." }.
+unique_indexes = []
+# Request lists that may hold a null on purpose: { property = "Request.Property", reason = "..." }.
+list_items_nullable = []

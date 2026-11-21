@@ -1,74 +1,71 @@
-# <!-- FILL: project name --> — Architecture
+# Book Boilerplate — architecture
 
-This document records the architecture of <!-- FILL: project name --> and, more
-importantly, **why** each decision was made. It is the answer to "where does this go?"
+How the boilerplate is built, and **why** each rule exists. The rules themselves are in the `CLAUDE.md`
+files; this guide is the reasoning behind them. Each section is linked from an instruction file.
 
-It describes the code as it stands. Where something is designed but not built, that is
-stated in place rather than left to be discovered.
+## 1. Overview
 
-**It owns the reasoning** — why each convention exists, and the trade-offs behind it —
-and changes when a decision is made. It states what is true now; superseded history is
-in [`archive/architecture-history.md`](archive/architecture-history.md). Which document
-owns every other topic is the table in
-[`CLAUDE.md`, *Where knowledge lives*](../CLAUDE.md#where-knowledge-lives).
+Three parts, each with one job:
 
-- Features are built from plan documents in [`plans/`](plans/), indexed with their
-  status and dependencies in [`project.md`](project.md#part-1--features-and-phasing).
-- Questions the requirements have not answered:
-  [`open-questions.md`](open-questions.md).
-
-### The *[enforced: X]* convention
-
-A rule a test or check fails the build on is marked *[enforced: X]*, where X names the
-test, check or guard rule. The mark is there so you do not trip the rule, not because
-anyone has to police it. **A rule without the mark is kept by review**; when a rule is
-broken twice, consider enforcing it. The rule is stated in `CLAUDE.md`; the reason for
-it is stated here, once.
-
----
-
-## Contents
-
-| | |
-|---|---|
-| [1. Layout and layering](#1-layout-and-layering) | the modules, and what may depend on what |
-| [2. Where code lives](#2-where-code-lives) | the folder layout, and the rule for placing a new file |
-| [3. Conventions](#3-conventions) | each convention, and why it exists |
-| [4. Errors](#4-errors) | expected failures versus faults |
-| [5. Data](#5-data) | storage, schema changes, and what is never done by hand |
-| [6. Cross-cutting decisions](#6-cross-cutting-decisions) | one table, every technology choice |
-| [7. Testing](#7-testing) | the suites, and what each guarantees |
-| [8. CI](#8-ci) | every step, and why it is there |
-| [9. Adding a new feature](#9-adding-a-new-feature) | the checklist |
-| [10. Naming](#10-naming) | what a thing is called, and what it is never called |
-| [Dependencies](#dependencies) | when to take a library, and the exit for each risky one |
-| [Environments and deployment](#environments-and-deployment) | the environments, and what is still missing |
-| [Not built yet](#not-built-yet) | designed, documented, absent from the code |
-| [Known trade-offs](#known-trade-offs) | deliberate compromises, and what would change them |
-
----
-
-## 1. Layout and layering
-
-<!-- FILL: the modules or projects, one line each, and the direction dependencies may
-point. Say which test enforces it, and mark it *[enforced: X]*. -->
-
-| Module | Contains | May depend on |
+| Part | Where | Job |
 |---|---|---|
-| <!-- FILL --> | <!-- FILL --> | <!-- FILL --> |
+| **The Book** | `CLAUDE.md`, `docs/`, `requirements/` | What is true: one owner document per topic |
+| **The checks** | `devtools/checks/`, `.githooks/` | Fail a commit or a local CI run on a broken rule |
+| **The Book CLI and the guard** | `devtools/factory/` | Set a Book up and keep it current (`book init`/`verify`/`upgrade`), work with the Git host and tracker, and refuse in-session what the rules forbid |
 
-**Why:** <!-- FILL: what the layering protects — e.g. business rules that do not change
-when the framework or the database does. -->
+**Every project-specific value lives in `devtools/factory/factory.toml`.** A tool reads its names,
+branches, paths and keys from there and carries none of its own. Why: the same tooling then serves
+every project, and `factory book verify` can say a leftover name from another project is a defect.
 
 ## 2. Where code lives
 
-<!-- FILL: the folder layout of one feature, and the rule for deciding where a new file
-goes. A worked example or two settles more arguments than the rule alone. -->
+- `devtools/checks/` — one script per rule family, each runnable alone, each with its self-tests in
+  `test_checks.py`. Standard library only, Python 3.11+.
+- `devtools/factory/` — `factory.py` (the CLI), one module per outside system (`bitbucket.py`,
+  `jira.py`, `drive.py`), `book.py` (init, verify and upgrade), `deploy.py` (the deploy steps, used when
+  `[deploy]` is set), `hooks/guard.py`.
+- `devtools/factory/book-template/` — `manifest.toml` (what `init` copies and `verify` expects),
+  `skeletons/` (the owner documents with `<!-- FILL -->` slots) and `packs/<pack>/` (files at their
+  target paths).
+
+**Packs live inside the template, never at their target paths here.** Why: a pack's rules
+(`src/CLAUDE.md`'s *[enforced]* markers, its checks) would otherwise be read as this repository's live
+rules, and `check-rules.py` would demand their test classes. `check-rules.py` reads every tracked
+`CLAUDE.md` outside `book-template/`.
 
 ## 3. Conventions
 
-One subsection per convention: **the rule, then why.** A rule whose reason is not
-written down gets removed by the first person it inconveniences.
+### Configuration over code
+
+A check that needs a project fact reads `factory.toml`: `base_ref` and `protected_branches`, `[book]`
+(names and title, stack, packs, roles, the *Found by* adoption date, the phase-table columns, the
+recommendation heading, whether a plan's derived status is enforced), `[guard]`, `[requirements.sources]` (the snapshot folders), `[commands]`,
+`[checks] fix_id`, `[jira] project`. An empty value turns the feature off and the tool says so (`N/A`), never `OK`.
+
+### One guard, rules as data
+
+The guard holds no project's rules: `[guard]` does. Its self-tests run against a full project's rules
+(`GUARD_RULES` in `test_guard.py`), so every Book's guard is held to the same behaviour.
+
+### Upgrades: three copies, and a project's change always wins
+
+`factory book upgrade`, run from a newer boilerplate, compares each file the template owns in three
+copies: the project's, the installed version's and the new template's. The installed version is
+`book_version` in the project's `factory.toml` (init writes it; a Book from before 1.2 falls back to
+its copied `book-template/manifest.toml`), rebuilt from the boilerplate's git tag `v<version>` with the
+project's names. A file equal to the installed copy was never edited, so `--apply` may replace it;
+a file that differs is the project's, and is only listed, with the template's change as a diff.
+Why: without a record of what was installed, a newer template cannot tell a stale file from a
+deliberate edit, and a copy-over either drifts or destroys work. The tags are the record, so a
+project carries no lock file. Why the report is the default: every change it would make is shown
+before it is made. The skeletons' documents, `docs/` (but the plan template) and `requirements/`
+are never compared: they are the project's content from the moment init writes them.
+
+### Self-tests against a fixture project
+
+The factory self-tests use `fixture_project.py` — a full project's `factory.toml` with the dotnet,
+deploy, bitbucket and fe-guides packs and a module map — not the boilerplate's own, which has few rules.
+A test about this repository's own configuration reads the real file.
 
 ### Coding principles (every stack)
 
@@ -154,97 +151,51 @@ cancellation token, a catch-all, a stray print, a Helper or Utility type. The re
 stack's own tests and lint rules, or review. A false positive is fixed in the rule or by
 an `exempt` entry with its reason, never by working around the pattern.
 
-### <!-- FILL: convention -->
+**A site kept on purpose is counted, not exempted.** A rule's `allowed` entries name a file,
+the number of matches it keeps and the reason; the full run fails when a file holds more (a
+new site) or fewer (a stale entry), so the list is a fact about the code, not a hope. A
+`require` rule turns the pattern round: at least so many matches must exist, once
+`require_when` says the rule is due (a migration test, once there is a migration). The
+template ships every list empty; each project's own entries, with their reasons, live in its
+`factory.toml`, which the template never overwrites.
 
-<!-- FILL: the rule in one sentence; *[enforced: X]* if it is. **Why:** the problem it
-prevents — a defect id if one prompted it. -->
+**Python checks, stack-neutral where the idea is.** A rule a regular expression can hold is a
+`[[code_rules]]` entry, so any stack can keep it; one that needs a language's shape — a
+validator behind a list, an index's columns and filter — is a pack's checker (the dotnet
+pack's `check-dotnet.py`), never a test inside the product. The docs rules (the defect
+ledger's words and classes, a defect id in a fix commit, an FE guide per changed route, an
+*AI files* line in a pull request) read only Markdown and git, so they hold on every stack.
 
-## 4. Errors
+## 4. Testing
 
-<!-- FILL: how an expected failure (validation, not found, conflict) is returned, how a
-fault is raised, and how each reaches the caller. What is never caught. -->
+The tooling's only build is its self-tests: `python devtools/checks/run-self-tests.py <folder>` over
+`devtools/factory/hooks`, `devtools/factory` and `devtools/checks`. It runs each folder's tests across
+processes, checks the count against discovery, and fails on zero tests or any skip — a self-test that
+skips proves nothing. A pack's own self-tests (`test_checks_dotnet.py`, `test_review_dotnet.py` …) run
+in a Book that installed the pack; here, `test_book.py` installs each stack and pack into a scratch
+repository and checks what lands, and that no source name survives.
 
-## 5. Data
+### CI
 
-<!-- FILL: the store, how the schema changes (migrations), what is generated, and what
-is never done by hand. Link the generated schema doc if there is one. -->
+There is no CI runner for the boilerplate. `sh devtools/checks/ci-local.sh` is the pull request's gate
+(`[local_ci] required`): the repository checks, the self-tests, and `[commands]`. The bitbucket pack adds
+`bitbucket-pipelines.yml` and `check-pipeline.py` for a project that has a runner.
 
-## 6. Cross-cutting decisions
+## 5. Adding a new feature
 
-| Concern | Decision | Why |
-|---|---|---|
-| <!-- FILL: e.g. logging, time, identity, configuration --> | <!-- FILL --> | <!-- FILL --> |
+A plan from `docs/plans/_template.md`, a row in `docs/project.md` Part 1, then the code with its
+self-tests, the doc that owns the behaviour changed in the same commit, `/book:self-review`, and the local CI.
 
-## 7. Testing
+## 6. Naming
 
-<!-- FILL: each suite — what it covers, what it needs to run (a database, a service),
-and what it guarantees. How to run one feature's tests. What makes a skipped test
-visible. -->
-
-| Suite | Covers | Needs | Command |
-|---|---|---|---|
-| <!-- FILL --> | <!-- FILL --> | <!-- FILL --> | <!-- FILL --> |
-
-## 8. CI
-
-<!-- FILL: the CI file, and which branches run which steps. -->
-
-| Step | What it does | Why |
-|---|---|---|
-| **Build** | <!-- FILL --> | Warnings are errors, so a warning cannot accumulate |
-| **Tests** | <!-- FILL --> | <!-- FILL: including how a skipped or empty suite fails the build --> |
-| **Generated docs match the source** | <!-- FILL: each generator with `--check` --> | A hand-edited or stale generated doc is caught before merge |
-| **Factory self-tests** | `python3 -m unittest` over the factory's tests, `factory.py index --check`, `factory.py verify --all` | The guard is a first layer; CI re-checks what reaches a pull request |
-| **No secrets in settings** | <!-- FILL --> | <!-- FILL --> |
-| **Dependencies** | <!-- FILL: licence and vulnerability checks --> | <!-- FILL --> |
-
-## 9. Adding a new feature
-
-1. **A row in [`project.md`](project.md#part-1--features-and-phasing)** and a plan from
-   [`plans/_template.md`](plans/_template.md), before any code.
-2. **Questions the requirements leave open** go to
-   [`open-questions.md`](open-questions.md) with a recommendation.
-3. <!-- FILL: the build order — which layer first, and what compiles before the next
-   step. -->
-4. **Tests that prove the behaviour**, including <!-- FILL: the project's mandatory
-   cases, e.g. authorization, isolation between tenants -->.
-5. **Regenerate the generated docs** the change reaches: <!-- FILL -->.
-6. **Update the owning docs in the same commit** — the plan, the feature's status in
-   `project.md`, and <!-- FILL: any guide for consumers of the feature -->.
-
-## 10. Naming
-
-<!-- FILL: what each kind of thing is called, and the names never used (e.g. a type
-whose last word is Helper, Manager or Utility). *[enforced: X]* where it is. -->
-
----
-
-## Dependencies
-
-**Prefer a maintained open-source library over writing our own**; write our own only
-when the surface is small, the dependency carries risk, and it stays behind one file.
-**Every third-party library stays isolated to one place.**
-
-| Library | Licence | Where it is isolated | Exit if it has to go |
-|---|---|---|---|
-| <!-- FILL: licence-sensitive or risky dependencies only --> | | | |
-
-## Environments and deployment
-
-<!-- FILL: each environment, what deploys to it and from which branch, and how
-configuration reaches it. What is still missing. -->
-
-## Not built yet
-
-<!-- FILL: designed and documented here, absent from the code. Delete an entry when it
-is built. -->
+Scripts are `check-<rule>.py` (fails on a broken rule), `gen-<doc>.py` (writes a generated document;
+`--check` fails when it is stale) and `test_<module>.py` (self-tests). Never a Helper or Utility module.
 
 ## Known trade-offs
 
-Compromises **considered and deliberately not fixed**. Each names what would change the
-decision, so it is revisited on evidence rather than on someone's memory. A defect
-surprised us; a trade-off is a thing we chose.
-
-| Trade-off | Why it stands | Revisit when |
-|---|---|---|
-| <!-- FILL --> | <!-- FILL --> | <!-- FILL --> |
+| Trade-off | Why we accept it |
+|---|---|
+| The Book CLI keeps the name `devtools/factory/factory.py` | Every project's skills and hooks call it there; a rename is its own release. In a Book + Factory install the referee goes to `devtools/ai-factory/` |
+| `ai-files`, `pr` and `protection` speak Bitbucket only | The projects using the Book are on Bitbucket; with no Bitbucket remote they report `N/A`, never `OK`. GitHub is a later pack |
+| The boilerplate has no CI runner | It is tooling only; `ci-local.sh` runs the same checks, and its PASS is required by `factory pr open` |
+| A pack's tests run only in a Book that installed it | They test files that are not live here; `test_book.py` installs every stack and pack into a scratch repository and checks the files land; the pack's own tests run in the Book that installed it |

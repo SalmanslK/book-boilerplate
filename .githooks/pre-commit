@@ -1,43 +1,84 @@
 #!/bin/sh
 #
-# Tracked in the repository, because .git/hooks is per-clone and cannot be shared. The kit's
-# install turns it on; in a new clone, once:
+# Tracked in the repository, because .git/hooks is per-clone and cannot be
+# shared. `factory book init` turns it on; in a new clone, once:
 #
 #     git config core.hooksPath .githooks
 #
-# Build-free checks only, so a commit stays quick: the book's rules, nothing personal or secret,
-# no protected file changed, no banned call added to the code, the generated task roll-up current,
-# every enforced rule still enforced.
-# Add the project's own build-free checks below the kit's; CI, where there is one, runs the same.
+# Anyone who has not run that command is still covered by the same checks in
+# CI (or devtools/checks/ci-local.sh while there is none), which is why they run
+# in both places. Build-free checks only, so a commit stays quick.
 #
-# Python is found by running it, not by name: Windows ships a `python3` stub that only offers to
-# install one, and a name check would find it and then fail every commit. `py -3` is the launcher a
-# python.org install leaves when its "add to PATH" box was not ticked; $py is left unquoted so it
-# splits into two words.
+# The Book's checks always run. A stack or host pack's check runs only where
+# that pack installed its script: each such line is guarded by `[ -f ]`.
 
 set -eu
 
 root="$(git rev-parse --show-toplevel)"
+checks="$root/devtools/checks"
+
+# The dotnet pack: no real secret in a settings file.
+if [ -f "$checks/check-appsettings-secrets.sh" ]; then
+    sh "$checks/check-appsettings-secrets.sh" --staged
+fi
+
+# Python is found by running it, not by name: Windows ships a `python3` stub that
+# only offers to install one, and a name check would find it and then fail every
+# commit. `py -3` is the launcher a python.org install leaves when its "add to
+# PATH" box was not ticked; $py is left unquoted so it splits into two words.
+staged="$(git diff --cached --name-only)"
 for py in python3 python "py -3"; do
     if $py -c pass >/dev/null 2>&1; then
-        # The book's own rules: links resolve, every document has an owner, history in the archive.
-        $py "$root/devtools/checks/check-book.py"
+        # The dotnet pack's generated docs: each generator's check runs when this commit stages
+        # something it is generated from — or the generated file itself, or the generator.
+        if [ -f "$checks/gen-api-contracts.py" ] && printf '%s\n' "$staged" | grep -qE '^(src/|devtools/api/|docs/api/|devtools/checks/(gen-api-contracts|api_contracts))'; then
+            $py "$checks/gen-api-contracts.py" --check
+        fi
+        if [ -f "$checks/gen-database-erd.py" ] && printf '%s\n' "$staged" | grep -qE '^(src/[^/]*\.Persistence/|docs/database-erd\.md|devtools/checks/gen-database-erd)'; then
+            $py "$checks/gen-database-erd.py" --check
+        fi
+        # The book's own rules: links resolve, every document has an owner, history in the archive,
+        # each D and Q id defined once.
+        $py "$checks/check-book.py"
+        # Every skill and agent loads: frontmatter, name, description length, a What next section.
+        $py "$checks/check-skills.py"
         # Nothing personal or secret in what this commit adds: no credential, no home-folder path, and
-        # not the committer's own email or machine name.
-        $py "$root/devtools/checks/check-private-data.py" --staged
+        # not the committer's own email or machine name (CLAUDE.md, Private settings).
+        $py "$checks/check-private-data.py" --staged
         # No read-only file (the requirements snapshots) or applied file changed: [guard] in factory.toml.
-        $py "$root/devtools/checks/check-protected-paths.py" --staged
-        # The lines this commit adds break none of the stack's code rules ([[code_rules]] in factory.toml):
-        # the system clock read in place, a task blocked on, a catch-all, a stray print.
-        $py "$root/devtools/checks/check-code-rules.py" --staged
+        $py "$checks/check-protected-paths.py" --staged
+        # The lines this commit adds break none of the stack's code rules ([[code_rules]] in factory.toml;
+        # none in a stack-free Book, so it passes at once).
+        $py "$checks/check-code-rules.py" --staged
         # docs/project.md's task tables match the plans they are generated from.
-        $py "$root/devtools/checks/gen-task-rollup.py" --check
+        $py "$checks/gen-task-rollup.py" --check
         # Every rule marked [enforced] still names a test or check that exists and runs.
-        $py "$root/devtools/checks/check-rules.py" --check
+        $py "$checks/check-rules.py" --check
+        # The dotnet pack: no integration test this commit stages builds its own host or database
+        # outside the allow-list. A stale allow-list entry is CI's and ci-local.sh's full run to find.
+        if [ -f "$checks/check-test-setup.py" ]; then
+            $py "$checks/check-test-setup.py" --staged
+        fi
+        # The dotnet pack's shape checks (list items, options validated on start, unique indexes), when this
+        # commit stages C# or the allow-lists in factory.toml.
+        if [ -f "$checks/check-dotnet.py" ] && printf '%s\n' "$staged" | grep -qE '(\.cs$|^devtools/factory/factory\.toml$)'; then
+            $py "$checks/check-dotnet.py"
+        fi
+        # The bitbucket pack: every pipeline step on our own runner with a time limit.
+        if [ -f "$checks/check-pipeline.py" ]; then
+            $py "$checks/check-pipeline.py"
+        fi
+        # The files that steer the AI this commit changes, the guard's own named apart: the guard asks
+        # only about a write it sees, and a script or `git apply` writes unseen. A note, never a
+        # refusal - the owner's approval on the pull request is the gate (`factory ai-files`).
+        $py "$root/devtools/factory/factory.py" ai-files --staged \
+            || echo "pre-commit: could not list the files that steer the AI this commit changes (factory ai-files --staged failed); look at the diff yourself." >&2
         exit 0
     fi
 done
 
 # No working Python: the checks above could not run, and a check that could not run does not pass.
-echo "pre-commit: no working Python (tried python3, python and py -3), so the book, private-data, protected-paths, code-rules, task roll-up and rules checks could not run. Install Python 3.11+ and commit again." >&2
+# CI repeats most of them, but not the committer's own email and machine name, which only this
+# machine knows — so the commit is refused rather than let through unchecked.
+echo "pre-commit: no working Python (tried python3, python and py -3), so the book, skills, private-data (your email and machine name), protected-paths, code-rules, task roll-up and rules checks could not run. Install Python 3.11+ and commit again." >&2
 exit 1

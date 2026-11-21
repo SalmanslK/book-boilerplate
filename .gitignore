@@ -1,13 +1,18 @@
+# The Book's block (factory book init). Add the stack's own ignores below it.
 
-# The AI factory's local evidence and guard log
+# Claude Code local overrides (keep shared .claude/ config in git)
+.claude/settings.local.json
+# Agent worktrees — transient, never part of the product
+.claude/worktrees/
+# The guard hook's local log of refusals and warnings
 .factory/
+# Local environment files; the committed example stays
+.env*
+!.env.example
+# Playwright MCP page snapshots — local, may show private documents
+.playwright-mcp/
 __pycache__/
-
-# Build output and dependencies
-bin/
-obj/
-TestResults/
-.vs/
-node_modules/
-dist/
-*.user
+# requirements/**/backup/ holds superseded tracker copies and must be tracked, whatever a stack's
+# `Backup*/` rule says (Windows matches it case-insensitively).
+!requirements/**/backup/
+!requirements/**/backup/**

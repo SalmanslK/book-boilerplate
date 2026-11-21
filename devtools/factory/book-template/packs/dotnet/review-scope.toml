@@ -1,0 +1,55 @@
+# The dotnet pack's review dimensions: one file per dimension, B1-B11 (checks 16-160), in place of the
+# plugin's core B0 file; the files are the project's, in .claude/review/.
+[review_scope]
+folder = ".claude/review"
+always = ["book:peer-review/references/review-method.md", "book:peer-review/references/review-pass-a.md"]
+
+[review_scope.dimensions]
+B1 = "review-b1-architecture.md"
+B2 = "review-b2-code-quality.md"
+B3 = "review-b3-api.md"
+B4 = "review-b4-security.md"
+B5 = "review-b5-data.md"
+B6 = "review-b6-performance.md"
+B7 = "review-b7-async.md"
+B8 = "review-b8-error-handling.md"
+B9 = "review-b9-testing.md"
+B10 = "review-b10-observability.md"
+B11 = "review-b11-configuration.md"
+
+[[review_scope.rows]]
+row = "Product code under `src/`"
+match = ["src/*"]
+not_applicable = []
+
+[[review_scope.rows]]
+row = "Tests only"
+match = ["tests/*"]
+not_applicable = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"]
+
+[[review_scope.rows]]
+row = "Docs only (`docs/`, other `*.md`)"
+match = ["docs/*", "*.md"]
+not_applicable = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11"]
+
+[[review_scope.rows]]
+row = "Tooling (`devtools/`, `.claude/`, `.githooks/`, CI)"
+match = ["devtools/*", ".claude/*", ".githooks/*", "bitbucket-pipelines.yml"]
+# B1 (the .NET layers), B3 (HTTP endpoints) and B5 (EF Core and the database) check what tooling
+# does not contain. B6 stays: the guard runs on every tool call, so its cost matters.
+not_applicable = ["B1", "B3", "B5"]
+
+[[review_scope.rows]]
+row = "A `CLAUDE.md` (root or nested)"
+match = ["CLAUDE.md", "*/CLAUDE.md"]
+not_applicable = []
+
+[[review_scope.rows]]
+row = "`requirements/**`"
+match = ["requirements/*"]
+not_applicable = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11"]
+
+[[review_scope.rows]]
+row = "Generated files: the API contracts, the database ERD, a migration's `.Designer.cs`, the model snapshot"
+match = ["docs/api/api-contracts.md", "docs/database-erd.md", "*.Designer.cs", "*ModelSnapshot.cs"]
+not_applicable = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11"]

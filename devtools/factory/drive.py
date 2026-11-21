@@ -1,7 +1,7 @@
 """
-Google Drive for the referee: the live FSD's last change (`modifiedTime`) and its comment threads —
-read only. The spec step's live check asks the Doc itself instead of taking a session's word, and
-`factory fsd-threads --save` keeps the threads beside the FSD snapshots.
+Google Drive for the AI tools: the live FSD's last change (`modifiedTime`) and its comment threads —
+read only. `factory fsd-threads` asks the Doc itself instead of taking a session's word, and
+`--save` keeps the threads beside the FSD snapshots.
 
 Which token is the person's choice, so it is in their private settings file outside the repository
 (`[requirements.sources] live_credential` in the private settings file, CLAUDE.md "Private settings"):
@@ -149,15 +149,6 @@ def get_json(path: str, token: str, query: dict | None = None) -> dict:
 
 def modified_time(file_id: str, token: str) -> str:
     return get_json(f"files/{file_id}", token, {"fields": "modifiedTime", "supportsAllDrives": "true"})["modifiedTime"]
-
-
-def export_text(file_id: str, token: str) -> str:
-    """The Doc's text as Drive exports it to plain text — what a section check compares."""
-    query = urllib.parse.urlencode({"mimeType": "text/plain", "supportsAllDrives": "true"})
-    status, body = fetch(f"{API}/files/{file_id}/export?{query}", token)
-    if status != 200:
-        raise DriveError(f"Google Drive answered {status} for the text export")
-    return body
 
 
 def comment_threads(file_id: str, token: str) -> list[dict]:

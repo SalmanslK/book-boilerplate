@@ -1,0 +1,13 @@
+# Findings check-private-data.py --commits accepts: personal or secret data already in a shared
+# branch's history, which cannot be removed without rewriting that history (CLAUDE.md forbids it).
+#
+# Each entry is one finding exactly as the check reports it — the FULL commit sha, the file and line
+# that commit added, and the kind — so the same text added by any other commit is still caught.
+# Only --commits reads this file, as dev holds it (CI's --accepted-from origin/dev) — never a branch's
+# own copy, so an entry takes effect once its pull request has merged into dev; --staged and --tracked
+# never read it, so the data must also be gone from
+# the current tree. An entry is added by an AI-file owner after review ([ai_files] in
+# devtools/factory/factory.toml), with the date it was accepted and why. A real credential is rotated
+# first: listing it here hides it from the check, not from the history.
+#
+# <full commit sha> | <file>:<line> | <kind, as the check prints it> | <accepted YYYY-MM-DD> | <reason>

@@ -1,0 +1,73 @@
+Master index of every requirements source under this folder.
+
+Purpose: a single place to enumerate everything that could go stale, for a human or a skill
+(`/book:check-sources all`) to walk - and the ONE place every live link is kept (LINKS, below). Each
+folder's read-me.txt keeps only its versioning rule and its "Last checked" line.
+
+This folder is READ-ONLY for everyone except the book:check-sources skill: a file that is already
+here is never edited. A new capture is a new file.
+
+Format per entry: local path -> what it is -> versioning.
+
+Cadence: at most ONE capture per source per week. A V<n> file is never overwritten, a tracker's
+superseded copy moves into backup/ first, and old captures stay where they are.
+
+=== LINKS - every live requirements source, in one place ===
+
+{{fsd_label}} (specification document): {{fsd_link}}
+Permissions matrix: <link>
+Product Q&A document: <link>
+QA artifacts folder: <link>
+FE integration bugs sheet: <link>
+Release plan sheet: <link>
+Wireframes / design board: <link>
+Client documents folder: <link>
+
+(Delete the lines the project does not have. Add one line per live source.)
+
+=== HAS A LIVE LINK (the link is in LINKS, above) ===
+
+fsd/
+  -> the specification, the requirements source of truth
+  -> versioning: "{{title}} - Functional Specifications - V<n>.pdf", never overwritten. Build from the
+     highest number (compared as numbers: V9 is below V15).
+
+permissions-matrix/
+  -> the source for permissions where the specification is silent
+  -> versioning: same V<n> scheme as fsd/
+
+product-questions-and-answers/
+  -> answers the product team gave outside the specification proper
+  -> versioning: same V<n> scheme as fsd/
+
+qa-artifacts/
+  -> QA's own test cases and checklists - corroborating evidence, not a requirement source
+  -> versioning: the superseded copy moves into backup/ with a date suffix; the new one takes the
+     plain filename.
+
+fe-integration-bugs/
+  -> the front-end team's integration findings
+  -> versioning: as qa-artifacts/
+
+release-plan/
+  -> the client's release plan
+  -> versioning: as qa-artifacts/
+
+wireframes/ (wireframes-V1/, wireframes-V2/, ...)
+  -> screen designs, informing but not overriding the specification
+  -> versioning: export the changed frames into the next wireframes-V<n>/ folder.
+
+client-documents/
+  -> documents the client delivered alongside the specification - background evidence
+  -> versioning: each file under its delivered name; a newer copy gets a "- V<n>" suffix.
+
+=== NO LIVE LINK ===
+
+(A source delivered as files, with nothing to fetch or diff. Its folder needs no read-me.txt: this
+entry is its record. An FSD delivered as a file also keeps its LINKS line, as "none - delivered as a file".)
+
+fe-api-contracts/
+  -> the front end's request for endpoints, as delivered.
+
+email-templates/
+  -> email designs as delivered.

@@ -1,0 +1,21 @@
+# Defects
+
+## How to use it
+
+1. **Add a row the day a defect is confirmed**, under [Open](#open), with the next `D<n>`.
+2. **Put the id in the fixing commit's message.**
+3. **When it is fixed:** move the full row to [`archive/defects-closed.md`](archive/defects-closed.md)
+   and add a one-line entry to [Fixed](#fixed). Never delete a row; never reuse an id.
+
+## Numbering
+
+Ids are `D<n>`, never reused; how to take one is [`docs/CLAUDE.md`](CLAUDE.md#ids--d-q).
+
+## Open
+
+| Id | Sev | Status | Defect | Where | Found by | Note |
+|---|---|---|---|---|---|---|
+
+## Fixed
+
+One line per fixed defect: id, what it was, and the commit that fixed it.

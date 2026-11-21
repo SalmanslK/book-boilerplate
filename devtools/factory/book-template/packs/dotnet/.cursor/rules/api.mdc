@@ -1,0 +1,7 @@
+---
+description: Endpoint, API-contracts and settings rules
+globs: src/Boilerplate.API/**
+alwaysApply: false
+---
+
+Read and follow [`src/Boilerplate.API/CLAUDE.md`](../../src/Boilerplate.API/CLAUDE.md) before changing anything under `src/Boilerplate.API/`. It holds the rules for this folder; the root `CLAUDE.md` still applies.

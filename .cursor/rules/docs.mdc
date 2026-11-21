@@ -1,0 +1,7 @@
+---
+description: Docs-writing rules: current state vs archive, defects, questions, plans
+globs: docs/**
+alwaysApply: false
+---
+
+Read and follow [`docs/CLAUDE.md`](../../docs/CLAUDE.md) before changing anything under `docs/`. It holds the rules for this folder; the root `CLAUDE.md` still applies.

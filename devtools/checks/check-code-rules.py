@@ -25,12 +25,28 @@ Globs: `**/` is any number of folders (none included), `*` any part of one name,
 case-sensitive, as git stores paths. A file matching `files` and no `exempt` glob is judged line by line;
 a line matching `skip_lines` is not.
 
+Two more shapes, for a rule that is not a plain ban:
+
+- **An allow-list** (`allowed`): the pattern is allowed only where the project says so, and as often as it
+  says, each place with its reason. The places are the project's own, so they live in its factory.toml,
+  never in the template. A file not listed may hold none; a listed file must hold exactly its `count` —
+  one more is a new site to justify, one fewer leaves the entry stale. Counted by match, not by line:
+
+      allowed = [{ file = "src/Api/Endpoints/AuthEndpoints.cs", count = 12, reason = "sign-in, before a token" }]
+
+- **A requirement** (`require = 1`): the pattern must appear at least that many times across the rule's
+  files — a test that has to exist, say. Only the full run judges it; a commit adds lines, it does not
+  show what the tree lacks. With `require_when` (globs) it is judged only once a tracked file matches one:
+  a migrations test, once there is a migration.
+
     python devtools/checks/check-code-rules.py            # every tracked file
     python devtools/checks/check-code-rules.py --staged   # pre-commit: the lines this commit adds
 
 With --staged the rules come from the staged factory.toml (the working copy when it is not staged), and
 only the lines the commit adds are judged: a file already holding a breach does not block an unrelated
-change to it, and the full run still reports it. A factory.toml with no rules passes, saying so.
+change to it, and the full run still reports it. An allow-listed file the commit adds a match to is
+counted whole, as staged, and fails when it holds more than its `count`. A factory.toml with no rules
+passes, saying so. The full run is CI's and devtools/checks/ci-local.sh's; it also reports a stale entry.
 
 Prints `path:line: id — matched: message` for each hit and exits 1 on any. "Could not check" — no readable
 factory.toml, a rule missing a key, a pattern that is not a valid expression, a git command that failed —
@@ -66,9 +82,23 @@ class CodeRule:
     exempt: tuple[re.Pattern, ...]
     skip_lines: re.Pattern | None
     message: str
+    # {path: (count, reason)}: where the pattern is allowed, and how often (an allow-list rule).
+    allowed: tuple[tuple[str, int, str], ...] = ()
+    # The least number of matches the rule's files must hold (a requirement rule); 0 for a ban.
+    require: int = 0
+    # A requirement is judged only once a tracked file matches one of these (none: always).
+    require_when: tuple[re.Pattern, ...] = ()
 
     def applies_to(self, path: str) -> bool:
         return any(g.fullmatch(path) for g in self.files) and not any(g.fullmatch(path) for g in self.exempt)
+
+    def allowance(self, path: str) -> tuple[int, str] | None:
+        return next(((count, reason) for listed, count, reason in self.allowed if listed == path), None)
+
+    def count(self, lines: list[tuple[int, str]]) -> int:
+        """The matches in these lines, the skipped lines left out."""
+        return sum(sum(1 for _ in self.pattern.finditer(text)) for _, text in lines
+                   if self.skip_lines is None or not self.skip_lines.search(text))
 
 
 def glob_regex(glob: str) -> re.Pattern:
@@ -128,8 +158,27 @@ def compile_rule(entry: object, where: str, prefix: str) -> CodeRule:
         skip = re.compile(entry["skip_lines"]) if entry.get("skip_lines") else None
     except re.error as error:
         raise CouldNotCheck(f"{where} {entry['id']}: not a valid expression ({error})") from error
+    allowed = []
+    for item in entry.get("allowed", []) or []:
+        file, count, reason = (item.get(key) for key in ("file", "count", "reason")) if isinstance(item, dict) else (None,) * 3
+        if not isinstance(file, str) or not file or isinstance(count, bool) or not isinstance(count, int) or count < 1:
+            raise CouldNotCheck(f"{where} {entry['id']}: an `allowed` entry needs a file and a count of 1 or more "
+                                f"({item!r})")
+        if not isinstance(reason, str) or not reason.strip():
+            raise CouldNotCheck(f"{where} {entry['id']}: the `allowed` entry for {file} gives no reason — "
+                                "every place on an allow-list says why it is there")
+        allowed.append((prefix + file, count, reason.strip()))
+    require = entry.get("require", 0)
+    if isinstance(require, bool) or not isinstance(require, int) or require < 0:
+        raise CouldNotCheck(f"{where} {entry['id']}: require is not a whole number")
+    if require and allowed:
+        raise CouldNotCheck(f"{where} {entry['id']}: a rule either requires the pattern or allow-lists it, not both")
+    when = entry.get("require_when", [])
+    if not isinstance(when, list) or not all(isinstance(item, str) for item in when):
+        raise CouldNotCheck(f"{where} {entry['id']}: require_when is not a list of globs")
     return CodeRule(str(entry["id"]), pattern, tuple(glob_regex(prefix + g) for g in entry["files"]),
-                    tuple(glob_regex(prefix + g) for g in entry.get("exempt", [])), skip, str(entry["message"]))
+                    tuple(glob_regex(prefix + g) for g in entry.get("exempt", [])), skip, str(entry["message"]),
+                    tuple(allowed), require, tuple(glob_regex(prefix + g) for g in when))
 
 
 def load_rules(text: str) -> list[CodeRule]:
@@ -191,17 +240,51 @@ def added_lines(root: Path) -> dict[str, list[tuple[int, str]]]:
     return found
 
 
-def hits(rules: list[CodeRule], lines: dict[str, list[tuple[int, str]]]) -> list[str]:
+def staged_file(root: Path, rel: str) -> list[tuple[int, str]]:
+    """A file as this commit stages it, numbered."""
+    return list(enumerate(git(root, "show", f":{rel}").splitlines(), start=1))
+
+
+def hits(rules: list[CodeRule], lines: dict[str, list[tuple[int, str]]], whole=None) -> list[str]:
+    """
+    The breaches in `lines`. `whole` is None for the full run (`lines` is every tracked file); in the
+    pre-commit run `lines` holds the added lines and `whole(path)` reads a staged file in full.
+    """
     found = []
     for rel in sorted(lines):
-        applicable = [rule for rule in rules if rule.applies_to(rel)]
-        for number, text in lines[rel] if applicable else []:
-            for rule in applicable:
+        applicable = [rule for rule in rules if rule.applies_to(rel) and not rule.require]
+        banned = [rule for rule in applicable if rule.allowance(rel) is None]
+        for number, text in lines[rel] if banned else []:
+            for rule in banned:
                 if rule.skip_lines is not None and rule.skip_lines.search(text):
                     continue
                 match = rule.pattern.search(text)
                 if match:
                     found.append(f"{rel}:{number}: {rule.id} — `{match.group(0).strip()}`: {rule.message}")
+        for rule in applicable:
+            allowance = rule.allowance(rel)
+            if allowance is None:
+                continue
+            allowed, reason = allowance
+            if whole is not None and not rule.count(lines[rel]):
+                continue  # the commit adds no match here; the full run counts the file
+            held = rule.count(whole(rel) if whole is not None else lines[rel])
+            if held > allowed or (whole is None and held < allowed):
+                more = ("a new site: justify it on the allow-list with a reason, or remove it" if held > allowed
+                        else "fewer than listed: lower the count, or remove the entry, so the list stays true")
+                found.append(f"{rel}: {rule.id} — {held} match(es), the allow-list says {allowed} ({reason}): "
+                             f"{more}. {rule.message}")
+    if whole is None:
+        for rule in rules:
+            for listed, _, _ in rule.allowed:
+                if listed not in lines or not rule.applies_to(listed):
+                    found.append(f"{listed}: {rule.id} — on the allow-list, but not a tracked file the rule "
+                                 "applies to: remove the stale entry")
+            due = not rule.require_when or any(g.fullmatch(rel) for rel in lines for g in rule.require_when)
+            if rule.require and due:
+                held = sum(rule.count(lines[rel]) for rel in lines if rule.applies_to(rel))
+                if held < rule.require:
+                    found.append(f"{rule.id} — {held} match(es) where at least {rule.require} must be: {rule.message}")
     return found
 
 
@@ -218,16 +301,18 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
             return 0
         if staged:
             lines, scope = added_lines(root), "the lines this commit adds"
+            found = hits(rules, lines, lambda rel: staged_file(root, rel))
         else:
             listed = git(root, "ls-files", "-z").split("\0")
             lines, scope = tracked_lines(root, [rel for rel in listed if rel]), "every tracked file"
-        found = hits(rules, lines)
+            found = hits(rules, lines)
     except CouldNotCheck as error:
         print(f"{NAME}: could not check — {error}", file=sys.stderr)
         return 1
     if found:
         print(f"{NAME}: {len(found)} breach(es) of the code rules in {scope} (rules: {FACTORY_TOML}). Fix the "
-              "code; a file that is the one allowed place belongs in the rule's `exempt`:", file=sys.stderr)
+              "code; a file that is the one allowed place belongs in the rule's `exempt`, a counted place on "
+              "its `allowed` list with a reason:", file=sys.stderr)
         print("\n".join(f"  {line}" for line in found), file=sys.stderr)
         return 1
     print(f"{NAME}: {len(rules)} code rule(s) hold in {scope}.")

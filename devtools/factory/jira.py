@@ -1,6 +1,6 @@
 """
-Jira Cloud for the referee: one issue — a Task, a Bug, a Story — read so a factory run can build or
-fix it. **Read only:** this module has a GET and nothing else, so no session can change Jira through
+Jira Cloud for the AI tools: one issue — a Task, a Bug, a Story — read so it can be built or
+fixed (`factory jira <key>`). **Read only:** this module has a GET and nothing else, so no session can change Jira through
 it (CLAUDE.md "Jira": Claude drafts, and posts only after approval, by hand).
 
 The credential is the person's own, in git's credential store for the Jira site (`[jira] site` in

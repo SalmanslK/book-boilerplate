@@ -1,0 +1,34 @@
+
+# [[code_rules]] - the pytest pack: the Python forms of the rules every stack keeps.
+[[code_rules]]
+id = "clock"
+pattern = '\bdatetime\.(?:now|utcnow|today)\(|\bdate\.today\(|(?<![\w.])time\.time(?:_ns)?\('
+files = ["src/**/*.py"]
+# The one module that reads the system clock, injected everywhere else.
+exempt = ["src/**/clock.py"]
+skip_lines = '^\s*#'
+message = "take the time from the injected clock, never the system clock in place (CLAUDE.md, Coding principles: time comes from an injected clock)."
+
+[[code_rules]]
+id = "bare-except"
+pattern = '^\s*except\s*:'
+files = ["src/**/*.py"]
+exempt = []
+message = "catch the exception you can handle; a bare except also swallows KeyboardInterrupt and SystemExit (CLAUDE.md, Coding principles: catch only the failures you can handle)."
+
+[[code_rules]]
+id = "print"
+pattern = '(?<![\w.])print\('
+files = ["src/**/*.py"]
+# A command-line entry point writes its output to the terminal.
+exempt = ["src/**/__main__.py"]
+skip_lines = '^\s*#'
+message = "log through the logging module with named fields, never print (CLAUDE.md, Coding principles: structured logging)."
+
+[[code_rules]]
+id = "vague-name"
+pattern = '^\s*class\s+\w*(?:Helper|Utility|Utilities|Utils)\b'
+files = ["src/**/*.py"]
+exempt = []
+message = "name the class for what it is or does, never Helper or Utility (CLAUDE.md, Coding principles: name things for what they are)."
+

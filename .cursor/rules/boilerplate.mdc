@@ -1,0 +1,21 @@
+---
+description: Boilerplate project rules — follow CLAUDE.md as the single source of truth
+alwaysApply: true
+---
+
+# Boilerplate
+
+Read and follow [`CLAUDE.md`](../../CLAUDE.md) for all work in this repo.
+
+That file is the contract: folder layout, git and branch rules, docs ownership, security, testing,
+and where feature state lives. Do not invent parallel rules here.
+
+## Quick pointers
+
+- Feature plan in `docs/plans/` + row in `docs/project.md` before code
+- Open questions → `docs/open-questions.md`; defects → `docs/defects.md`
+- Prefer project skills (`/book:self-review`, `/book:commit`, `/book:ship`, the docs skills) over ad hoc process
+- Skills live under `.claude/skills/`, which Cursor loads directly
+- Each folder with its own `CLAUDE.md` has a scoped rule beside this one that points at it
+- Never commit to a protected branch directly — open a pull request
+- The specification wins every requirements conflict

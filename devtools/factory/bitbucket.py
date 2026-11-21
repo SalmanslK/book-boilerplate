@@ -1,8 +1,8 @@
 """
-Bitbucket Cloud for the referee: a pull request's approvals, description and
-activity, and the repository's branch restrictions — and two writes, opening a
-pull request (`factory open-pr`, `factory pr open`) and posting a comment
-(`factory pr comment`), as the person whose token it is.
+Bitbucket Cloud for the AI tools (`factory pr`, `ai-files`, `pr-check`, `protection`): a pull
+request's approvals, description and activity, and the repository's branch restrictions — and two
+writes, opening a pull request (`factory pr open`) and posting a comment (`factory pr comment`), as
+the person whose token it is.
 
 The token comes from BITBUCKET_TOKEN (CI's secured variable) or, on a laptop,
 from git's credential store — the person's own, asked with GCM_INTERACTIVE=never,
@@ -188,14 +188,14 @@ def fetch_with_urllib(url: str, token: str) -> tuple[int, str]:
     raise BitbucketError(f"api.bitbucket.org did not answer {url} after {ATTEMPTS} attempts")
 
 
-def send_with_curl(url: str, token: str, body: str) -> tuple[int, str]:
+def send_with_curl(url: str, token: str, body: str, method: str = "POST") -> tuple[int, str]:
     """
-    POST a JSON body. The token goes on stdin as before; the body through a temporary file,
+    POST (or PUT) a JSON body. The token goes on stdin as before; the body through a temporary file,
     since stdin is taken. Never retried once it may have reached the server.
     """
     curls = curl_binaries()
     if not curls:
-        return send_with_urllib(url, token, body)
+        return send_with_urllib(url, token, body, method)
     config = (f'header = "Authorization: Bearer {token}"\nheader = "Accept: application/json"\n'
               'header = "Content-Type: application/json"\n')
     with tempfile.TemporaryDirectory() as folder:
@@ -203,24 +203,24 @@ def send_with_curl(url: str, token: str, body: str) -> tuple[int, str]:
         payload.write_text(body, encoding="utf-8")
         for curl in curls:
             try:
-                done = subprocess.run([curl, "-s", "--max-time", "60", "-X", "POST", "-K", "-",
+                done = subprocess.run([curl, "-s", "--max-time", "60", "-X", method, "-K", "-",
                                        "--data-binary", f"@{payload}", "-w", "\n%{http_code}", url],
                                       input=config, capture_output=True, text=True, encoding="utf-8",
                                       errors="replace", timeout=90)
             except subprocess.TimeoutExpired as error:
-                raise BitbucketError(f"No answer to the POST to {url}; it may have been created — "
+                raise BitbucketError(f"No answer to the {method} to {url}; it may have been created — "
                                      "look before trying again.") from error
             body_out, _, code = done.stdout.rpartition("\n")
             if done.returncode == 0 and code.isdigit() and code != "000":
                 return int(code), body_out
             if done.returncode not in NEVER_SENT_CURL_EXITS:
-                raise BitbucketError(f"curl exited {done.returncode} on the POST to {url}; it may have been "
+                raise BitbucketError(f"curl exited {done.returncode} on the {method} to {url}; it may have been "
                                      "created — look before trying again.")
-    raise BitbucketError(f"Could not reach api.bitbucket.org to POST to {url}; nothing was sent.")
+    raise BitbucketError(f"Could not reach api.bitbucket.org to {method} to {url}; nothing was sent.")
 
 
-def send_with_urllib(url: str, token: str, body: str) -> tuple[int, str]:
-    request = urllib.request.Request(url, data=body.encode("utf-8"), method="POST", headers={
+def send_with_urllib(url: str, token: str, body: str, method: str = "POST") -> tuple[int, str]:
+    request = urllib.request.Request(url, data=body.encode("utf-8"), method=method, headers={
         "Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
@@ -228,8 +228,13 @@ def send_with_urllib(url: str, token: str, body: str) -> tuple[int, str]:
     except urllib.error.HTTPError as error:
         return error.code, error.read().decode("utf-8", errors="replace")
     except (urllib.error.URLError, ConnectionError, TimeoutError) as error:
-        raise BitbucketError(f"The POST to {url} failed ({type(error).__name__}); it may have been created — "
+        raise BitbucketError(f"The {method} to {url} failed ({type(error).__name__}); it may have been created — "
                              "look before trying again.") from error
+
+
+def put_with_curl(url: str, token: str, body: str) -> tuple[int, str]:
+    """PUT a JSON body — an update in place — the way send_with_curl POSTs one."""
+    return send_with_curl(url, token, body, "PUT")
 
 
 def repository(root: Path) -> str:
@@ -247,7 +252,7 @@ def repository(root: Path) -> str:
 def token(root: Path, repo: str, personal: bool = False) -> str:
     """
     BITBUCKET_TOKEN, else git's credential store. Never printed. `personal` skips the variable:
-    an action taken in a person's name (`open-pr`) uses only their own stored credential — a
+    an action taken in a person's name (`pr open`, `pr comment`, `pr whoami`) uses only their own stored credential — a
     repository access token acts as a bot user, and a PR it opens would not be theirs.
     """
     from_env = None if personal else os.environ.get("BITBUCKET_TOKEN")
@@ -272,6 +277,7 @@ class Bitbucket:
     token: str = field(repr=False)  # never in a traceback, a debug print or a log line
     fetch: Fetch = fetch_with_curl
     send: Send = send_with_curl
+    put: Send = put_with_curl
 
     @classmethod
     def for_repository(cls, root: Path, personal: bool = False) -> Bitbucket:
@@ -338,6 +344,18 @@ class Bitbucket:
             raise BitbucketError(f"Bitbucket answered {status} opening the pull request: {answer[:300]}")
         return json.loads(answer)
 
+    def update_description(self, number: int, title: str, description: str) -> dict:
+        """
+        Replaces a pull request's description, as whoever owns the token. The title goes too, since an
+        update names it: the PR's own unless the caller changes it. Nothing else is sent, so the
+        reviewers, branches and state are left as they are.
+        """
+        url = f"{API}/repositories/{self.repo}/pullrequests/{number}"
+        status, answer = self.put(url, self.token, json.dumps({"title": title, "description": description}))
+        if status != 200:
+            raise BitbucketError(f"Bitbucket answered {status} updating PR #{number}'s description: {answer[:300]}")
+        return json.loads(answer)
+
     def comments(self, number: int) -> list[dict]:
         return self.paged(f"pullrequests/{number}/comments?pagelen=100")
 
@@ -352,12 +370,20 @@ class Bitbucket:
             raise BitbucketError(f"Bitbucket answered {status} posting the comment: {answer[:300]}")
         return json.loads(answer)
 
+    def resolve_comment(self, number: int, comment_id: int) -> dict:
+        """Marks one comment thread resolved, as whoever owns the token. Bitbucket answers 409 when it already is."""
+        url = f"{API}/repositories/{self.repo}/pullrequests/{number}/comments/{comment_id}/resolve"
+        status, answer = self.send(url, self.token, "{}")
+        if status not in (200, 201):
+            raise BitbucketError(f"Bitbucket answered {status} resolving comment #{comment_id}: {answer[:300]}")
+        return json.loads(answer) if answer.strip() else {}
+
 
 def commit_arrived(activity: list[dict], commit: str) -> str:
     """
     When the PR first showed `commit`, by Bitbucket's clock — its activity's `update` entries
     carry the source commit and the time. A commit's own date is whatever its author set
-    (the re-review's #8), so it cannot say when an approval came after the code. "" if unseen.
+    so it cannot say when an approval came after the code. "" if unseen.
     """
     times = [entry["update"].get("date", "") for entry in activity
              if "update" in entry and commit and
@@ -365,32 +391,7 @@ def commit_arrived(activity: list[dict], commit: str) -> str:
     return min((t for t in times if t), default="")
 
 
-# ---------------------------------------------------------------- what the referee asks of them
-
-def approvers(pull_request: dict, excluded: set[str], since: str = "") -> list[str]:
-    """
-    Who approved, apart from the author and any excluded identity (the factory's own) — and, given
-    `since` (an ISO time), only an approval made after it: one from before the commit approved older code.
-    """
-    author = (pull_request.get("author") or {}).get("display_name", "")
-    cutoff = parse_time(since)
-    if since and cutoff is None:
-        # A time that does not parse must not drop the "after the commit" condition (the harness review).
-        raise BitbucketError(f"Could not read the time {since!r}, so no approval can be dated after it.")
-    names = []
-    for participant in pull_request.get("participants", []):
-        if not participant.get("approved"):
-            continue
-        when = parse_time(participant.get("participated_on") or "")
-        if cutoff and (when is None or when < cutoff):
-            continue
-        user = participant.get("user") or {}
-        identities = {user.get("display_name"), user.get("nickname"), user.get("account_id"), user.get("uuid")}
-        if user.get("display_name") == author or identities & excluded:
-            continue
-        names.append(user.get("display_name") or user.get("nickname") or "unknown")
-    return names
-
+# ---------------------------------------------------------------- what the tools ask of them
 
 def parse_time(text: str) -> datetime | None:
     """Bitbucket's and git's ISO times, both with an offset; None when absent or unreadable."""
@@ -436,7 +437,11 @@ DESCRIPTION_SECTIONS = {
     "test plan": re.compile(r"(?im)^\s*(#+\s*|\*\*)test plan\b"),
 }
 DEV_TESTING = re.compile(r"(?im)^\s*(#+\s*|\*\*)dev testing\b")
-JIRA_KEY = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b")
+# One Effort line, the time from starting the work to opening the PR and the review rounds (its format is
+# the /book:ship skill's, Step 3) - `**Effort:** 3 hours, 1 review round`, `Effort: …`, or a heading with the
+# text under it.
+EFFORT = re.compile(r"(?im)^[ \t]*(?:[-*][ \t]+)?(?:\*\*)?effort\b(?:\*\*)?[ \t]*:?(?:\*\*)?[ \t]*[^\s*:]"
+                    r"|^[ \t]*#+[ \t]*effort[ \t]*:?[ \t]*\n\s*[^\s#]")
 LOCAL_CI = re.compile(r"(?im)^\s*(#+\s*|\*\*)local ci\b")
 NEXT_HEADING = re.compile(r"(?m)^\s*(#+\s|\*\*\w)")
 # The line ci-local.sh prints, PASS on `<12-character sha>` (...); nothing looser counts.
@@ -445,7 +450,7 @@ PASS_LINE = re.compile(r"(?m)^PASS on `(?P<sha>[0-9a-f]{12,40})`")
 
 def local_ci_problems(text: str, head: str) -> list[str]:
     """
-    While CI is switched off: the description's "Local CI" section is a PASS from the local CI run for the pull
+    the description's "Local CI" section is a PASS from devtools/checks/ci-local.sh for the pull
     request's head commit — not an earlier one, since a later push is what it never saw.
     """
     opening = LOCAL_CI.search(text)
@@ -462,17 +467,43 @@ def local_ci_problems(text: str, head: str) -> list[str]:
     return []
 
 
-def description_problems(pull_request: dict, local_ci_required: bool = False) -> list[str]:
+def jira_tracked(branch: str, title: str, project: str) -> bool:
     """
-    CLAUDE.md: a summary and a test plan; a Jira-tracked PR also Dev testing & notes for FE/QA; and while
-    CI is suspended, a Local CI section for the head commit.
+    Whether a PR is for a Jira issue of `project` (factory.toml [jira] project): CLAUDE.md, Git puts the key
+    right after the branch's type, `fix/PROJ-310-short-slug`, and in the title. Only that project's key
+    counts, so `UTF-8` or `V14-2` in a title, or a key later in the branch name, does not.
+    """
+    if not project:
+        return False
+    key = re.escape(project) + r"-\d+"
+    return bool(re.match(rf"[a-z]+/{key}(?=-|$)", branch) or re.search(rf"(?<![\w-]){key}(?![\w-])", title))
+
+
+# The line ci-local.sh's Local CI section carries (`- AI files: 3 changed (...)`), or one written by hand.
+AI_FILES = re.compile(r"(?im)^[ \t]*(?:[-*][ \t]+)?(?:\*\*)?ai files(?::\*\*|\*\*:|:)[ \t]*\S")
+
+
+def description_problems(pull_request: dict, local_ci_required: bool = False, jira_project: str = "",
+                         ai_files: list[str] | None = None) -> list[str]:
+    """
+    CLAUDE.md: a summary, a test plan and an Effort line; a Jira-tracked PR also Dev testing & notes for
+    FE/QA; while CI is suspended, a Local CI section for the head commit; and when the PR changes files that
+    steer the AI (`ai_files`, worked out by the caller), an *AI files* line naming them, so the owner's
+    approval is asked for before the merge, not found after it (CLAUDE.md, Git). `jira_project` is the
+    [jira] project key in factory.toml; without one no PR counts as Jira-tracked.
     """
     text = pull_request.get("description") or ""
     problems = [f"no '{name}' section" for name, pattern in DESCRIPTION_SECTIONS.items() if not pattern.search(text)]
+    if not EFFORT.search(text):
+        problems.append("no 'Effort' line - the time from starting the work to opening the PR, and the review rounds")
     source = ((pull_request.get("source") or {}).get("branch") or {}).get("name", "")
-    if (JIRA_KEY.search(source) or JIRA_KEY.search(pull_request.get("title") or "")) and not DEV_TESTING.search(text):
+    if jira_tracked(source, pull_request.get("title") or "", jira_project) and not DEV_TESTING.search(text):
         problems.append("a Jira-tracked PR needs a 'Dev testing & notes for FE/QA' section")
     if local_ci_required:
         head = (((pull_request.get("source") or {}).get("commit") or {}).get("hash") or "")
         problems += local_ci_problems(text, head)
+    if ai_files and not AI_FILES.search(text):
+        listing = ", ".join(ai_files[:5]) + (f" and {len(ai_files) - 5} more" if len(ai_files) > 5 else "")
+        problems.append(f"no 'AI files' line, though the PR changes {len(ai_files)} file(s) that steer the AI "
+                        f"({listing}) - the Local CI section carries it; an [ai_files] owner makes or approves the PR")
     return problems

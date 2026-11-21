@@ -3,7 +3,7 @@
 Keep what is personal or secret out of the repository (CLAUDE.md, Private settings).
 
 A person's settings and credentials live in their private settings file outside every repository
-(`private_settings` in factory.toml), or in the tool that owns them — git's credential store, rclone's config,
+(`private_settings` in factory.toml, `~/.<slug>/local.toml`), or in the tool that owns them — git's credential store, rclone's config,
 user secrets. This check fails a commit, or a build, that would put one in a tracked file:
 
 - what looks like a credential — the guard's own list (a private key, an AWS, Atlassian, Bitbucket,

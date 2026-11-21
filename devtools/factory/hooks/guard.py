@@ -5,12 +5,13 @@ never to do.
 
 Wired in .claude/settings.json for the file-writing tools (Edit, Write,
 MultiEdit, NotebookEdit), the shell tools (Bash, PowerShell, Monitor) and the
-read tools (Read, Grep, Glob, NotebookRead — for the private-settings rule).
+read tools (Read, Grep, Glob, NotebookRead — for the private-settings rule) and a
+Google Drive connector's MCP tools (for the drive-write rule).
 Claude Code passes the tool call as JSON on stdin; this prints one JSON decision
-on stdout and always exits 0. When it cannot judge a call — its rules or the run
-state unreadable, an unexpected error — it refuses anything but a plain read.
+on stdout and always exits 0. When it cannot judge a call — its rules unreadable,
+an unexpected error — it refuses anything but a plain read.
 
-Three outcomes per rule:
+Two outcomes per rule:
 
     deny   refused with the reason. In warn mode (guard-config.json) it is
            allowed instead, and the session is told it would have been refused.
@@ -20,12 +21,11 @@ Three outcomes per rule:
            instruction files), Claude Code's own settings outside the
            repository, a force-push, dropping a database, and the person's
            private settings file. Never downgraded.
-    always a deny that warn mode does not downgrade — the factory's own integrity:
-           gate-approval, session-marker, test-locked, run-record, run-unreadable.
 
 This is a first layer, not the authority: the commit hooks and CI re-check what
 reaches a pull request, and a shell command can always write a file some way
-this cannot parse. Where it cannot parse a command reliably, it refuses it. See docs/plans/ai-factory-harness.md §2.3 and §5.1.
+this cannot parse. Where it cannot parse a command reliably, it asks; where a command
+hides what it runs, it refuses it.
 
 Every decision other than allow is appended to .factory/guard-log.jsonl with
 the rule, the tool and the path — never the command or the content, which may
@@ -55,18 +55,16 @@ from typing import Callable, Iterable
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "guard-config.json")
 LOG_RELATIVE = os.path.join(".factory", "guard-log.jsonl")
+REASON_LOGGED = 120
 
 FACTORY_CONFIG = os.path.join(os.path.dirname(HERE), "factory.toml")
 
 DENY = "deny"
 ASK = "ask"
-ALWAYS = "always"
 
 FILE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
 SHELL_TOOLS = frozenset({"Bash", "PowerShell", "Monitor"})
 
-PERSON_ONLY_COMMANDS = frozenset({"approve", "unlock", "abandon", "open-pr", "answer", "allow"})
-RECORD_FENCE = "```json factory-record"  # factory.RECORD_FENCE — the self-test holds them equal
 LOCAL_DB_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
@@ -88,11 +86,18 @@ class Rules:
     non_dev_target: re.Pattern
     dotnet_ef: bool
     appsettings_secrets: bool
-    runs_dir: str = "docs/factory/runs"
     service_accounts: tuple[str, ...] = ()
     private_settings: str = ""
-    # `[guard] hooks_path`: the folder (or folders) core.hooksPath may name; empty for the defaults (DEFAULT_HOOKS).
-    hooks_path: tuple[str, ...] = ()
+    env_prefix: str = ""
+    # Google Drive (H4): an MCP tool whose name `drive_connector` matches is a Drive connector's; it passes
+    # only when its own name starts with one of `drive_read_verbs`. `rclone_deleting` are the rclone
+    # commands that delete on a remote.
+    drive_connector: re.Pattern = re.compile(r"(?!)")
+    drive_read_verbs: tuple[str, ...] = ()
+    rclone_deleting: tuple[str, ...] = ()
+    drive_reason: str = ""
+    # Tools decided against here (H12): ((name globs), reason) — installing or running one is refused.
+    banned_tools: tuple[tuple[tuple[str, ...], str], ...] = ()
 
 
 class RulesUnavailable(Exception):
@@ -139,22 +144,20 @@ def rules() -> Rules:
             non_dev_target=re.compile(rf"\b({words})\b" if words else r"(?!)", re.IGNORECASE),
             dotnet_ef=bool(guard.get("dotnet_ef", False)),
             appsettings_secrets=bool(guard.get("appsettings_secrets", False)),
-            runs_dir=str(raw.get("runs_dir", "docs/factory/runs")).rstrip("/"),
             service_accounts=tuple(guard.get("service_accounts", [])),
             private_settings=str(raw.get("private_settings", "")),
-            hooks_path=configured_hooks(guard.get("hooks_path")),
+            env_prefix=str((raw.get("book") or {}).get("env_prefix") or ""),
+            drive_connector=re.compile(guard.get("drive_connector") or r"(?!)"),
+            drive_read_verbs=tuple(str(verb).lower() for verb in guard.get("drive_read_verbs", [])),
+            rclone_deleting=tuple(str(command).lower() for command in guard.get("rclone_deleting", [])),
+            drive_reason=guard.get("drive_reason", "A session never changes Google Drive."),
+            banned_tools=tuple((tuple(str(name).lower() for name in entry["names"]), str(entry["reason"]))
+                               for entry in guard.get("banned_tools", [])),
         )
-    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, re.error) as error:
         raise RulesUnavailable(f"could not read [guard] from {FACTORY_CONFIG}: {type(error).__name__}") from error
     _RULES.append(loaded)
     return loaded
-
-
-def configured_hooks(value) -> tuple[str, ...]:
-    """`[guard] hooks_path` as a tuple: one folder, a list of them, or nothing."""
-    if value is None:
-        return ()
-    return (str(value),) if isinstance(value, str) else tuple(str(item) for item in value)
 
 
 def matches(rel: str, patterns: Iterable[str]) -> bool:
@@ -197,8 +200,7 @@ def personal_home_path(text: str) -> bool:
 
 READ_TOOLS = frozenset({"Read", "Grep", "Glob", "NotebookRead"})
 # Pieces of a path or command that name a credential store wherever it sits.
-# `/.ai-factory/` is the kit's default settings folder: private even when FACTORY_LOCAL_SETTINGS points elsewhere.
-PRIVATE_MARKERS = ("/local.toml", "/.ai-factory/", ".git-credentials", "rclone.conf", ".netrc", ".credentials.json",
+PRIVATE_MARKERS = (".git-credentials", "rclone.conf", ".netrc", ".credentials.json",
                    "id_rsa", "id_ecdsa", "id_ed25519", "/.ssh/", "/.aws/", "/gcloud/", "/.docker/config.json")
 SECRET_VARIABLE = re.compile(r"(PASSWORD|PASSWD|TOKEN|SECRET|CREDENTIAL|API_?KEY|PRIVATE_?KEY)", re.IGNORECASE)
 PRINTERS = frozenset({"echo", "printf", "write-output", "write-host", "print", "out-host", "out-string"})
@@ -207,16 +209,19 @@ ENVIRONMENT_PRINTERS = (["export"], ["export", "-p"], ["declare"], ["declare", "
                         ["typeset"], ["typeset", "-p"], ["typeset", "-x"])
 
 
-# What moves the private settings file (its own folder is protected wherever factory.toml puts it; `/local.toml`
-# above holds one in any folder while the config cannot be read).
-SETTINGS_VARIABLES = ("FACTORY_LOCAL_SETTINGS",)
+def settings_variable() -> str:
+    """factory.settings_variable(): `[book] env_prefix` + LOCAL_SETTINGS, BOOK_LOCAL_SETTINGS without one."""
+    try:
+        prefix = rules().env_prefix
+    except RulesUnavailable:
+        prefix = ""
+    return (prefix or "BOOK_") + "LOCAL_SETTINGS"
 
 
 def private_settings_path() -> str:
-    """factory.private_settings_path(), without importing the referee — the self-test holds them equal."""
-    for variable in SETTINGS_VARIABLES:
-        if os.environ.get(variable):
-            return os.environ[variable]
+    """factory.private_settings_path(), without importing factory.py — the self-test holds them equal."""
+    if os.environ.get(settings_variable()):
+        return os.environ[settings_variable()]
     try:
         configured = rules().private_settings
     except RulesUnavailable:
@@ -224,8 +229,14 @@ def private_settings_path() -> str:
     return os.path.expanduser(configured or "~/.ai-factory/local.toml")
 
 
+def private_markers() -> tuple[str, ...]:
+    """PRIVATE_MARKERS, plus the private settings folder's own name (`.<slug>`) wherever it sits."""
+    folder = posixpath.basename(posixpath.dirname(private_settings_path().replace("\\", "/")))
+    return ((folder.lower(),) if folder.startswith(".") else ()) + PRIVATE_MARKERS
+
+
 # The home folder and the roaming application-data folder in every shell's spelling: `$HOME`, `${HOME}`,
-# `$env:USERPROFILE`, `${env:USERPROFILE}`, `$USERPROFILE`, `%USERPROFILE%` (once: `rg token $USERPROFILE`
+# `$env:USERPROFILE`, `${env:USERPROFILE}`, `$USERPROFILE`, `%USERPROFILE%` (`rg token $USERPROFILE`
 # searched the home folder unseen), and `$APPDATA`'s kin.
 HOME_VARIABLE = re.compile(r"\$\{(?:env:)?(?:home|userprofile)\}|\$(?:env:)?(?:home|userprofile)(?!\w)|"
                            r"%(?:home|userprofile)%", re.IGNORECASE)
@@ -246,7 +257,7 @@ def normal_path(text: str, cwd: str | None = None) -> str:
     """
     `text` as the guard compares paths: `~` and the home folder's variables written out, forward slashes, a
     relative path resolved from `cwd` (the folder the guard follows), `.`, `..` and doubled slashes folded,
-    lower case. Once, `~/./.git-cred*`, `~//.git-cred*` and `/proc//self/environ` named a store the
+    lower case. `~/./.git-cred*`, `~//.git-cred*` and `/proc//self/environ` named a store the
     comparison did not see.
     """
     text = to_native(expand_home(text.strip().strip("'\""))).replace("\\", "/")
@@ -263,7 +274,7 @@ def normal_path(text: str, cwd: str | None = None) -> str:
 
 def private_places() -> list[tuple[str, bool]]:
     """Where the credential stores PRIVATE_MARKERS names usually are, and whether each is a folder — what a
-    wildcard (`~/.git-cred*`, `~/.my*/local.toml`) is compared against, since it holds no marker itself."""
+    wildcard (`~/.git-cred*`, `~/.<slug>*/local.toml`) is compared against, since it holds no marker itself."""
     home = normal_path("~").rstrip("/")
     appdata = normal_path(os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming"))
     mine = normal_path(private_settings_path())
@@ -307,7 +318,7 @@ def is_private(path_or_token: str, cwd: str | None = None, dotglob: bool = True)
         # A wildcard names no store itself, but the shell expands it to one: `cat ~/.git-cred*`.
         if any(could_name(text, place, folder, dotglob) for place, folder in private_places()):
             return True
-    return text.startswith(posixpath.dirname(mine) + "/") or any(m in text for m in PRIVATE_MARKERS) \
+    return text.startswith(posixpath.dirname(mine) + "/") or any(m in text for m in private_markers()) \
         or bool(PROC_ENVIRON.search(text))
 
 
@@ -376,7 +387,7 @@ STORE_SEARCH = ("This searches a folder that holds a credential store (the home 
 
 def read_tool_findings(tool: str, tool_input: dict, cwd: str) -> list[Finding]:
     """The read tools: a path naming a store, a Grep glob that can match one, and a Grep whose folder holds one —
-    its `path`, or the working folder without one, resolved from there (once: a `..` chain, `.` in the home
+    its `path`, or the working folder without one, resolved from there (a `..` chain, `.` in the home
     folder)."""
     path_keys = ("file_path", "notebook_path", "path")
     targets = [str(tool_input.get(key) or "") for key in path_keys]
@@ -404,10 +415,10 @@ def identity_files(name: str, argv: list[str]) -> set[int]:
     """
     The positions in `argv` where ssh, scp or sftp is handed a key file (`-i <key>`, `-i<key>`, `-vi <key>`,
     `-o IdentityFile=<key>`). ssh reads the key in its own process and sends only a signature to the
-    server: the session never sees it — the way /deploy-dev-qa reaches the office server. Every other
+    server: the session never sees it — the way /deploy reaches the office server. Every other
     word is still judged, so `cat ~/.ssh/id_ed25519` and a remote command naming a store stay refused.
     Only the client's own options are read — up to `--` or the first word that is not one — and a key is
-    never a word starting with `-` (once: `scp -i -i <store> host:` copies the store). A key inside the
+    never a word starting with `-` (`scp -i -i <store> host:` copies the store). A key inside the
     private settings folder is not let through.
     """
     if name not in SSH_CLIENTS:
@@ -474,7 +485,7 @@ def recursive_search_roots(name: str, args: list[str]) -> list[str]:
     """
     The folders a recursive content search starts from (`grep -r`, `rg`, `ag`, `ack`, `findstr /s`), its pattern
     among them (a pattern judged as a folder only refuses more); none for a search that is not recursive. With no
-    folder named it searches the working folder, `.` (once: `cd ~ && rg token`).
+    folder named it searches the working folder, `.` (`cd ~ && rg token`).
     """
     lowered = [arg.lower() for arg in args]
     recursive = name in ("rg", "ag", "ack") or (
@@ -527,7 +538,7 @@ def listing_roots(name: str, args: list[str], powershell: bool) -> list[str] | N
             skip = False
         elif lowered in POWERSHELL_PATH_OPTIONS or lowered == "-literalpath":
             continue  # its value is a path: the next word is kept
-        # `-i` is `-Include` too (once: read as no option, `gci -r -i Migrations` listed a folder named Migrations
+        # `-i` is `-Include` too (read as no option, `gci -r -i Migrations` listed a folder named Migrations
         # here, and `| ri -r` passed).
         elif powershell and (len(lowered) > 2 or lowered == "-i") and (
                 "-filter".startswith(lowered) or "-include".startswith(lowered)):
@@ -595,7 +606,7 @@ def recursive_listing(name: str, args: list[str], powershell: bool) -> bool:
     if name == "find" and not powershell:
         return True
     if name in ("get-childitem", "gci", "dir", "ls") and powershell:
-        # `-r` and `-Depth` recurse too (once: `gci -r -Include Migrations | Remove-Item` was read as listing only
+        # `-r` and `-Depth` recurse too (`gci -r -Include Migrations | Remove-Item` was read as listing only
         # the working folder, and passed). A switch may carry its value after a colon — `-Recurse:1` recurses,
         # only `-Recurse:0`/`:$false` does not.
         def recurses(arg: str) -> bool:
@@ -618,7 +629,7 @@ ENVIRONMENT_DUMP = re.compile(r"GetEnvironmentVariables\s*\(", re.IGNORECASE)
 
 def secret_reference_pattern(secret_names: Iterable[str] = ()) -> re.Pattern:
     """A variable named like a secret (`$GITHUB_TOKEN`, `${env:X_PASSWORD}`, `%API_KEY%`) — or one this command line
-    filled from one (once: `x=$GITHUB_TOKEN; echo $x`)."""
+    filled from one (`x=$GITHUB_TOKEN; echo $x`)."""
     copies = "|".join(re.escape(name) for name in sorted(secret_names))
     named = r"[A-Za-z0-9_]*" + SECRET_VARIABLE.pattern + (rf"|(?:{copies})(?![A-Za-z0-9_])" if copies else "")
     return re.compile(r"(?:\$\{?(?:env:)?|%)(?:" + named + ")", re.IGNORECASE)
@@ -795,11 +806,6 @@ class Repo:
             raise GitUnavailable(f"git did not answer ({type(error).__name__})") from error
         return done.stdout.strip() if done.returncode == 0 else None
 
-    def worktrees(self) -> list[str]:
-        """The folders of every worktree of this repository, this one included."""
-        listing = self._git("worktree", "list", "--porcelain") or ""
-        return [line.removeprefix("worktree ").strip() for line in listing.splitlines() if line.startswith("worktree ")]
-
     def exists(self, rel: str) -> bool:
         return os.path.exists(os.path.join(self.root, rel))
 
@@ -815,7 +821,7 @@ class Repo:
     def _walk(self, base: str) -> list[tuple[str, list[str], list[str]]]:
         """
         Every folder beneath `base` (from the root, itself included) with its child folders and files, build output
-        and the tools' caches left out — walked once per evaluation and kept (once: each `**` glob walked the tree
+        and the tools' caches left out — walked once per evaluation and kept (each `**` glob walked the tree
         again, so 400 of them ran past the hook's time limit, and a hook past it does not block).
         """
         walks: dict[str, list[tuple[str, list[str], list[str]]]] = self.__dict__.setdefault("_walks", {})
@@ -857,7 +863,7 @@ class Repo:
         """
         The files the shell glob `rel` (from the root) matches now, segment by segment — `*` stays inside one
         folder, as the shell's does, and finds hidden names too, as PowerShell's does; `**` is any number of
-        folders, none included, as bash's globstar reads it (once: it was read as one folder, so
+        folders, none included, as bash's globstar reads it (it was read as one folder, so
         `src/**/<applied migration>` matched nothing). None past MAX_MATCHES: the caller then judges the glob
         by every rule path it could match.
         """
@@ -886,7 +892,7 @@ class Repo:
     def _base_listing(self, folder: str) -> set[str] | None:
         """
         Every file beneath `folder` on the base branch (or, without one, in the index), from one git call cached
-        for this evaluation — once, asking git once per file a glob matched took seven seconds for the migrations.
+        for this evaluation — asking git once per file a glob matched took seven seconds for the migrations.
         """
         cache: dict[str, set[str] | None] = self.__dict__.setdefault("_listings", {})
         if folder not in cache:
@@ -904,11 +910,6 @@ class Repo:
         listing = self._base_listing(posixpath.dirname(rel))
         return listing is not None and rel in listing
 
-    def on_base_folder(self, folder: str) -> bool:
-        """Whether the base branch holds any file beneath `folder` — a folder the team reviewed in, not one
-        this session just made. Without a base branch, the index would be what this session staged: no."""
-        return bool(self._base_listing(folder)) and bool(self.__dict__.get("_has_base"))
-
     def current_branch(self, cwd: str | None = None) -> str | None:
         return self._git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
 
@@ -916,309 +917,45 @@ class Repo:
         upstream = self._git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}", cwd=cwd)
         return upstream.split("/", 1)[1] if upstream and "/" in upstream else upstream
 
-    def factory_view(self) -> FactoryView | None:
-        """The open factory run on this branch, read through the referee; None when there is none."""
-        if not hasattr(self, "_view"):
-            self._view = load_factory_view(self.root)
-        return self._view
+    def other_repository(self, cwd: str | None) -> str | None:
+        """
+        The top folder of the git repository `cwd` is in, when it is not this one; otherwise None. This
+        project's branch rules are about this project: a personal repository's `main` is not this one's.
+        A worktree shares this repository's git folder, and a second clone shares its `origin`, so both
+        are this repository and keep its rules. A folder the guard cannot name, or git cannot answer
+        for, is treated as this repository.
+        """
+        if cwd is None or not self.knows(cwd):
+            return None
+        theirs = self._git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=cwd)
+        ours = self._git("rev-parse", "--path-format=absolute", "--git-common-dir")
+        if not theirs or not ours or same_folder(theirs, ours):
+            return None
+        origin = self._git("remote", "get-url", "origin", cwd=cwd)
+        if origin and remote_identity(origin) == remote_identity(self._git("remote", "get-url", "origin") or ""):
+            return None
+        return self._git("rev-parse", "--show-toplevel", cwd=cwd)
 
 
-@dataclass(frozen=True)
-class FactoryView:
-    run_file: str
-    step: str
-    gate: bool
-    writes: tuple[str, ...]
-    lock: frozenset[str]
-    text: str
-    driving_session: str | None = None
-    driving_step: str | None = None
-    escalated: bool = False
-    # A run file the referee cannot read: why, and the paths held until it reads again.
-    unreadable: str | None = None
-    protected: tuple[str, ...] = ()
-    unreadable_reason: str | None = None
-    # Open runs held by other branches, but whose files are in this checkout: (path, text).
-    # Their Records and locks hold here too — switching branch freed them (the third review).
-    other_runs: tuple[tuple[str, str], ...] = ()
-    # False when no open run belongs to this branch: no step, so no step scope.
-    has_step: bool = True
-
-    def run_texts(self) -> dict[str, str]:
-        texts = dict(self.other_runs)
-        if self.run_file:
-            texts[self.run_file] = self.text
-        return texts
-
-
-def unreadable_view(root: str, factory, config) -> FactoryView | None:
+def remote_identity(url: str) -> str:
     """
-    A run file on the branch that does not parse. Dropping the run rules then would free every
-    locked test and the Record at once (the re-review's MEDIUM-4), so the run files and the
-    tests are held instead until a person repairs it.
+    A remote URL as host and path, so one repository written two ways is one: SSH or HTTPS, a
+    user name, a trailing `.git` or slash, and case all differ between clones of the same origin.
     """
-    from pathlib import Path
-    folder = Path(root) / config.runs_dir
-    if not folder.is_dir():
-        return None
-    for path in sorted(folder.iterdir()):
-        if not factory.RUN_FILE_NAME.match(path.name):
-            continue
-        try:
-            factory.parse_run(path.read_text(encoding="utf-8"), path)
-        except (factory.FactoryError, OSError, ValueError):
-            return FactoryView(
-                run_file=f"{config.runs_dir}/{path.name}", step="unreadable", gate=False, writes=(),
-                lock=locks_without_referee(root, config.runs_dir), text="", unreadable=f"{config.runs_dir}/{path.name}",
-                protected=held_patterns(config.runs_dir, test_globs(factory, config)))
-    return None
+    text = url.strip().lower().rstrip("/")
+    text = text[:-4] if text.endswith(".git") else text
+    scheme = re.match(r"^[a-z][a-z0-9+.-]*://", text)
+    if scheme:
+        host, _, path = text[scheme.end():].partition("/")
+        host = host.rsplit("@", 1)[-1].split(":", 1)[0]  # a user name, then a port
+    else:  # the scp form, git@host:workspace/repo
+        host, _, path = text.partition(":")
+        host = host.rsplit("@", 1)[-1]
+    return f"{host}/{path.strip('/')}"
 
 
-def test_globs(factory, config) -> tuple[str, ...]:
-    """Every stack's test and lock globs (the referee's merged adapter with [[stacks]]); none when the config cannot say."""
-    try:
-        settings = factory.adapter(config)
-    except (KeyError, TypeError, AttributeError, ValueError):
-        settings = config.raw.get("adapter", {})
-    return tuple(settings.get("test_files", [])) + tuple(settings.get("lock_files", []))
-
-
-# What a test is called, and where tests live, in the stacks the kit installs into: .NET, JavaScript and
-# TypeScript (Vitest, Jest, Playwright), Python, Go, Java. A held view cannot trust the configuration that
-# says which files are this project's tests — it is held because that configuration or the referee broke —
-# so it holds these as well as whatever globs could still be read. A literal `tests/*` held only a top-level
-# folder: a React project's locked src/cart/Cart.test.tsx stayed writable (the kit audit, 2026-10-18).
-# `*` spans folders in matches(), so every pattern reaches any depth. Holding a few files that are not tests
-# while a person repairs the run state is the price of failing closed.
-TEST_FILE_NAMES = (
-    "tests/*", "test/*", "*/tests/*", "*/test/*", "__tests__/*", "*/__tests__/*", "*Tests/*",
-    "*Tests.cs", "*Test.cs", "*.test.*", "*.spec.*", "test_*.py", "*/test_*.py", "*_test.py", "conftest.py",
-    "*/conftest.py", "*_test.go", "*Test.java", "*Tests.java",
-)
-
-
-def held_patterns(runs_dir: str, tests: Iterable[str] = ()) -> tuple[str, ...]:
-    """What a held view protects: the run files, the project's own test globs when known, and every test name."""
-    return tuple(dict.fromkeys((f"{runs_dir}/*", *tests, *TEST_FILE_NAMES)))
-
-
-def locks_without_referee(root: str, runs_dir: str) -> frozenset[str]:
-    """
-    Every path an open run in `runs_dir` has locked, read from the run files' Records without the referee —
-    the held views know what was proven red even when factory.py or factory.toml is what broke. A run file
-    whose Record does not parse adds nothing here; TEST_FILE_NAMES and the configured globs hold for it.
-    """
-    from pathlib import Path
-    folder = Path(root) / runs_dir
-    locked: set[str] = set()
-    try:
-        paths = sorted(folder.iterdir()) if folder.is_dir() else []
-    except OSError:
-        return frozenset()
-    for path in paths:
-        if not RUN_FILE_NAME.match(path.name):
-            continue
-        try:
-            record = record_without_referee(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(record, dict) or record.get("status") != "open" \
-                or "merge-gate" in (record.get("gates") or {}):
-            continue
-        lock = record.get("lock")
-        if isinstance(lock, (dict, list)):
-            locked.update(str(item) for item in lock)
-    return frozenset(locked)
-
-
-RUN_FILE_NAME = re.compile(r"^R-(\d{3})\.md$")  # factory.RUN_FILE_NAME
-
-
-def record_without_referee(text: str):
-    """factory.parse_record: the one Record fence under `## Record`, or None."""
-    if text.count(RECORD_FENCE) != 1:
-        return None
-    heading = re.search(r"^## Record[ \t]*$", text, re.MULTILINE)
-    start = text.find(RECORD_FENCE)
-    if heading is None or start < heading.end():
-        return None
-    body = text.find("\n", start) + 1
-    end = text.find("\n```", body)
-    return json.loads(text[body:end]) if end >= 0 else None
-
-
-def test_globs_without_referee(root: str) -> tuple[str, ...]:
-    """The test and lock globs factory.toml names — `[adapter]`, or each `[[stacks]]` prefixed with its root —
-    read with tomllib, without the referee; none when the file cannot be read."""
-    import tomllib
-    from pathlib import Path
-    try:
-        raw = tomllib.loads((Path(root) / "devtools" / "factory" / "factory.toml").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return ()
-    found: list[str] = []
-    try:
-        adapters = [("", raw.get("adapter") or {})] + [
-            (str(stack.get("root", "")).strip("/"), stack.get("adapter") or {})
-            for stack in raw.get("stacks") or [] if isinstance(stack, dict)]
-        for prefix, settings in adapters:
-            for key in ("test_files", "lock_files"):
-                found += [f"{prefix}/{glob}" if prefix else str(glob) for glob in settings.get(key, [])]
-    except (AttributeError, TypeError):
-        return tuple(found)
-    return tuple(found)
-
-
-def held_view(why: str, runs_dir: str = "docs/factory/runs", tests: tuple[str, ...] = (),
-              root: str | None = None) -> FactoryView:
-    """
-    The run state could not be read. "No run" would free every locked test and every Record (the
-    harness review), so the run files and the tests are held until a person repairs what broke —
-    with `root`, every path an open run locked as well (locks_without_referee).
-    """
-    return FactoryView(run_file="", step="unreadable", gate=False, writes=(),
-                       lock=locks_without_referee(root, runs_dir) if root else frozenset(), text="",
-                       unreadable=runs_dir, unreadable_reason=why, protected=held_patterns(runs_dir, tests))
-
-
-def holds_no_runs(root, factory) -> bool:
-    """
-    A checkout whose factory.toml defines no steps and that has no runs folder: the tools without the
-    factory, as `dev` carries them. It can hold no run, so it locks nothing. Judging another worktree
-    (F-12) loaded such a checkout's config with this referee, failed on the missing steps and refused
-    every test change there. A config that does not parse, or a runs folder beside a config
-    without steps, still fails closed in load_factory_view.
-    """
-    import tomllib
-    try:
-        raw = tomllib.loads((root / factory.CONFIG_RELATIVE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
-    runs = raw.get("runs_dir", "docs/factory/runs")
-    return "steps" not in raw and not (root / runs).exists()
-
-
-def runs_dir_without_referee(root: str) -> str:
-    """The runs folder factory.toml names, read without the referee; the default when it cannot be read."""
-    import tomllib
-    from pathlib import Path
-    try:
-        raw = tomllib.loads((Path(root) / "devtools" / "factory" / "factory.toml").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return "docs/factory/runs"
-    return str(raw.get("runs_dir", "docs/factory/runs"))
-
-
-def load_factory_view(root: str) -> FactoryView | None:
-    factory = referee()
-    if factory is None:
-        # A checkout with run files and no working referee: "no run" would free every locked test and every
-        # Record (the 15 Oct review's #5), so they are held until a person repairs factory.py.
-        from pathlib import Path
-        runs = runs_dir_without_referee(root)
-        if (Path(root) / runs).is_dir():
-            return held_view("the referee (devtools/factory/factory.py) could not be imported, so which tests a run "
-                             "has locked cannot be known; a person repairs it", runs, test_globs_without_referee(root),
-                             root)
-        return None
-    from pathlib import Path
-    if holds_no_runs(Path(root), factory):
-        return None
-    try:
-        config = factory.load_config(Path(root))
-    except (factory.FactoryError, OSError, ValueError, KeyError, TypeError, AttributeError) as error:
-        # The file may still parse as TOML: its runs folder and test globs, read without the referee, are held.
-        return held_view(f"the referee could not load factory.toml ({type(error).__name__}), so which tests a run "
-                         "has locked cannot be known; a person repairs factory.toml",
-                         runs_dir_without_referee(root), test_globs_without_referee(root), root)
-    # A run file that does not parse must not free what it held.
-    tests = test_globs(factory, config)
-    try:
-        broken = unreadable_view(root, factory, config)
-    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
-        broken = held_view(f"the run files could not be read ({type(error).__name__})", config.runs_dir, tests, root)
-    if broken is not None:
-        return broken
-    # Every open run in this checkout, whatever branch it names: a lock or a Record that holds only
-    # on its own branch was freed by `git checkout -b tmp` (the third review's HIGH #1). A run past
-    # its merge gate holds nothing — its tests are the team's again.
-    try:
-        runs = factory.load_runs(Path(root), config)
-        branch = factory.current_branch(Path(root))
-    except (factory.FactoryError, OSError, ValueError, KeyError, TypeError, AttributeError) as error:
-        return held_view(f"the open runs could not be read ({type(error).__name__})", config.runs_dir, tests, root)
-    open_runs = [run for run in runs if run.path is not None and run.record.get("status") == "open"
-                 and "merge-gate" not in (run.record.get("gates") or {})]
-    if not open_runs:
-        return None
-
-    def rel(run) -> str:
-        return Path(run.path).resolve().relative_to(Path(root).resolve()).as_posix()
-
-    lock = frozenset(path for run in open_runs for path in run.record.get("lock", {}))
-    mine = [run for run in open_runs if run.record.get("branch") == branch]
-    others = tuple((rel(run), Path(run.path).read_text(encoding="utf-8")) for run in open_runs if run not in mine)
-    if len(mine) > 1:
-        names = ", ".join(rel(run) for run in mine)
-        return FactoryView(
-            run_file="", step="unreadable", gate=False, writes=(), lock=lock, text="", unreadable=names,
-            protected=held_patterns(config.runs_dir, tests),
-            unreadable_reason=f"{len(mine)} open factory runs claim branch {branch} ({names}), so which "
-                              "one's step and locks apply cannot be told")
-    if not mine:
-        return FactoryView(run_file="", step="elsewhere", gate=False, writes=(), lock=lock, text="",
-                           other_runs=others, has_step=False)
-    run = mine[0]
-    try:
-        step = factory.current_step(run.record, config)
-    except (factory.FactoryError, KeyError, TypeError, AttributeError):
-        step = None
-    return FactoryView(
-        run_file=rel(run),
-        step=step.name if step else "done",
-        gate=bool(step and step.gate),
-        writes=step.writes if step else (),
-        lock=lock,
-        text=Path(run.path).read_text(encoding="utf-8"),
-        driving_session=(run.record.get("driving") or {}).get("session"),
-        driving_step=(run.record.get("driving") or {}).get("step"),
-        escalated=bool(run.section_text("Escalation")),
-        other_runs=others,
-    )
-
-
-MAX_STOP_BLOCKS = 3
-
-
-def stop_decision(payload: dict, repo: Repo) -> dict | None:
-    """
-    Stop hook. A session `factory drive` is driving through a step may not end until the
-    referee has passed that step or the session has escalated — "it stops early" is the
-    failure the factory exists to prevent. Three refusals per step at most, so a session
-    that truly cannot continue ends and the conductor reports it.
-    """
-    view = repo.factory_view()
-    session = payload.get("session_id")
-    if view is None or not view.driving_session or session != view.driving_session:
-        return None
-    if view.escalated or view.step != view.driving_step:
-        return None
-    counter = os.path.join(repo.root, ".factory", "stops", f"{session}-{view.driving_step}")
-    try:
-        with open(counter, encoding="utf-8") as handle:
-            count = int(handle.read().strip() or 0)
-    except (OSError, ValueError):
-        count = 0
-    if count >= MAX_STOP_BLOCKS:
-        return None
-    os.makedirs(os.path.dirname(counter), exist_ok=True)
-    with open(counter, "w", encoding="utf-8") as handle:
-        handle.write(str(count + 1))
-    return {"decision": "block", "reason": (
-        f"guard: step {view.driving_step} of this factory run has not passed. Run "
-        "`python3 devtools/factory/factory.py check` and fix what it reports. If it cannot pass, "
-        f"add an `## Escalation` section to {view.run_file} saying what blocks you and what a "
-        "person must decide, then stop.")}
+def same_folder(one: str, other: str) -> bool:
+    return os.path.normcase(os.path.realpath(one)) == os.path.normcase(os.path.realpath(other))
 
 
 # ---------------------------------------------------------------- paths
@@ -1360,59 +1097,7 @@ def whole_target(target: str, cwd: str, root: str, pathspec: bool = False) -> st
     return (pattern if rel == "." else f"{rel}/{pattern}") if pattern else rel
 
 
-def path_findings(rel: str, repo: Repo, through_shell: bool = False, whole_folder: bool = False) -> list[Finding]:
-    """
-    The rules for one path: an open run's first, then the repository's. `whole_folder`: the command
-    removes, moves or restores the path whole, so a folder is judged by what lies beneath it as well.
-    """
-    if rel == "." and not whole_folder:
-        return []
-    view = repo.factory_view()
-    # A glob reaches what it can match, as a folder reaches what lies beneath it: `sed -i … tests/*.cs`
-    # writes a locked test as surely as `rm -rf tests` does.
-    reaching = whole_folder or any(char in rel for char in "*?[")
-    if view is not None and view.unreadable:
-        if matches(rel, view.protected):
-            why = view.unreadable_reason or (
-                f"{view.unreadable} is a factory run file the referee cannot read, so what its Record holds — "
-                "the test locks, the gates — cannot be checked")
-            return [Finding(
-                "run-unreadable", ALWAYS,
-                f"{why}. Nothing under the runs or tests changes until a person repairs it from their own "
-                "terminal.", rel)]
-        if rel in view.lock or (reaching and held_under(rel, view.lock)):
-            return [Finding("test-locked", ALWAYS, f"{rel} is locked by an open factory run.", rel)]
-        return static_path_findings(rel, repo, whole_folder)
-    if view is not None:
-        if rel in view.lock or (reaching and held_under(rel, view.lock)):
-            return [Finding(
-                "test-locked", ALWAYS,
-                f"{rel} was proven red and locked for an open run. Make the code pass it; a person can release "
-                "it with `factory unlock`.", rel)]
-        if through_shell and (rel in view.run_texts() or (reaching and held_under(rel, view.run_texts()))):
-            return [Finding(
-                "run-record", ALWAYS,
-                f"{rel} is a factory run file. Change its sections with the file tools; its Record is the "
-                "referee's.", rel)]
-    return static_path_findings(rel, repo, whole_folder) + step_scope_findings(rel, view)
-
-
-def step_scope_findings(rel: str, view: FactoryView | None) -> list[Finding]:
-    if view is None or not view.has_step or rel in view.run_texts() or rel.startswith(".factory/"):
-        return []
-    if view.gate:
-        return [Finding(
-            "step-scope", ASK,
-            f"The run is waiting at {view.step} for a person's approval; nothing should change until then.", rel)]
-    if any(fnmatch.fnmatch(rel, pattern) for pattern in view.writes):
-        return []
-    allowed = ", ".join(view.writes) or "only the run file"
-    return [Finding(
-        "step-scope", ASK,
-        f"The run is at step {view.step}, which may write {allowed} — not {rel}. A person confirms.", rel)]
-
-
-def static_path_findings(rel: str, repo: Repo, whole_folder: bool = False) -> list[Finding]:
+def path_findings(rel: str, repo: Repo, whole_folder: bool = False) -> list[Finding]:
     """
     The repository's own rules for one path. `whole_folder`: the command removes, moves or restores the
     path whole, so a folder is judged by the protected paths beneath it as well (`rm -rf requirements`,
@@ -1553,106 +1238,10 @@ def written_text(tool: str, tool_input: dict) -> str:
     return ""
 
 
-def referee():
-    """The referee module, imported the way load_factory_view does; None if it cannot be."""
-    parent = os.path.dirname(HERE)
-    if parent not in sys.path:
-        sys.path.insert(0, parent)
-    try:
-        import factory
-    except Exception:  # noqa: BLE001 — a referee that does not compile or fails as it loads is as missing as an absent one
-        return None
-    return factory
-
-
-def text_after(tool: str, tool_input: dict, current: str) -> str | None:
-    """
-    The run file as it would read after the call, or None when the call would fail anyway
-    (an old_string that is absent, or not unique without replace_all) or cannot be worked out.
-    """
-    if tool == "Write":
-        return str(tool_input.get("content", ""))
-    if tool not in ("Edit", "MultiEdit"):
-        return None
-    edits = (tool_input.get("edits") or []) if tool == "MultiEdit" else [tool_input]
-    text = current
-    for edit in edits:
-        old, new = str(edit.get("old_string", "")), str(edit.get("new_string", ""))
-        count = text.count(old) if old else 0
-        if count == 0 or (count > 1 and not edit.get("replace_all")):
-            return None
-        text = text.replace(old, new) if edit.get("replace_all") else text.replace(old, new, 1)
-    return text
-
-
-def run_file_findings(tool: str, tool_input: dict, rel: str, current: str) -> list[Finding]:
-    """
-    Judged on the file as it would be after the call, not on the strings the call carries:
-    two edits, each harmless-looking, planted a second Record fence and then armed it (the
-    re-review's HIGH-1). The Record, the title and the one fence must come out unchanged,
-    and the file must still be one the referee can read. A call whose result cannot be
-    worked out is refused: Claude Code matches curly quotes to straight ones, so an
-    old_string absent here can still land in the Record (the third review's HIGH #2).
-    """
-    def refuse(why: str) -> list[Finding]:
-        return [Finding("run-record", ALWAYS,
-                        f"That {why} in {rel}, which only the referee writes. Edit the session's sections; "
-                        "the referee updates the rest through `factory` commands.", rel)]
-
-    after = text_after(tool, tool_input, current)
-    factory = referee()
-    if factory is None:
-        return refuse("cannot be checked — the referee cannot be loaded — so it is a change")
-    if after is None:
-        return refuse("edit's result cannot be worked out exactly (its old_string is not in the file once, "
-                      "character for character), so it is a change")
-    if after.count(RECORD_FENCE) != 1:
-        return refuse("would leave other than one Record block")
-    if after.replace("\r\n", "\n").split("\n", 1)[0] != current.replace("\r\n", "\n").split("\n", 1)[0]:
-        return refuse("changes the title line")
-    try:
-        factory.parse_run(after)
-    except factory.FactoryError:
-        return refuse("would leave a file the referee cannot read")
-    if factory.parse_record(after) != factory.parse_record(current):
-        return refuse("changes the Record")
-    # The header, Checks and Gates are drawn from the Record; an edit there shows a forged
-    # approval or status in the PR's diff even though the Record is untouched (the branch review).
-    if factory.referee_parts(after) != factory.referee_parts(current):
-        return refuse("changes the header, Checks or Gates")
-    return []
-
-
-def other_worktree(target: str, cwd: str, repo: Repo) -> Repo | None:
-    """
-    The other worktree of this repository that holds `target`, as a Repo of its own: its open runs and
-    their locks are its own. A session in one checkout edited a locked test in another, unjudged, because
-    the path lay outside its own root (the dry run's F-12).
-    """
-    if not target or relative_to_root(target, cwd, repo.root):
-        return None
-    for other in repo.worktrees():
-        if other and os.path.normcase(os.path.realpath(other)) != os.path.normcase(os.path.realpath(repo.root)) \
-                and relative_to_root(target, cwd, other):
-            return Repo(other)
-    return None
-
-
 def file_tool_findings(tool: str, tool_input: dict, cwd: str, repo: Repo) -> list[Finding]:
     target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
-    elsewhere = other_worktree(str(target), cwd, repo)
-    if elsewhere is not None:
-        return file_tool_findings(tool, tool_input, cwd, elsewhere)
     rel = relative_to_root(str(target), cwd, repo.root)
     findings = path_findings(rel, repo) if rel else claude_settings_findings(str(target), cwd)
-    view = repo.factory_view() if rel else None
-    if rel and new_run_file(rel, repo) and not (view is not None and rel in view.run_texts()):
-        findings.append(Finding(
-            "run-record", ALWAYS,
-            f"{rel} would be a new factory run file. Only `factory start` opens a run; a second open run on "
-            "a branch would leave which one holds unclear.", rel))
-    elif view is not None and not view.unreadable and rel in view.run_texts():
-        findings += run_file_findings(tool, tool_input, rel, view.run_texts()[rel])
     return findings + git_config_file_findings(str(target), cwd) + secret_findings(rel, written_text(tool, tool_input))
 
 
@@ -1722,13 +1311,6 @@ def claude_settings_findings(target: str, cwd: str, folder_too: bool = False) ->
                     "A person confirms every change to them.", None)]
 
 
-def new_run_file(rel: str, repo: Repo) -> bool:
-    """A file tool creating R-nnn.md in the runs folder — `factory start`'s job, never the session's."""
-    folder, _, name = rel.rpartition("/")
-    return (folder.lower() == rules().runs_dir.lower() and re.fullmatch(r"R-\d{3}\.md", name) is not None
-            and not repo.exists(rel))
-
-
 # ---------------------------------------------------------------- shell
 #
 # The guard reads a command the way bash or PowerShell will, or refuses it. Each stage below
@@ -1775,6 +1357,11 @@ HEREDOC_OPENER = re.compile(r"<<(-?)[ \t]*(\\?)(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\
 
 class Unparsed(Exception):
     """The guard cannot tell where a command starts or ends; it refuses rather than guess."""
+
+
+class Unclosed(Unparsed):
+    """A quote, bracket, backtick or comment that never closes: the shell rejects the command and runs
+    nothing, so a person may read it and decide. Any other Unparsed is a form that can hide what runs."""
 
 
 class _Reading:
@@ -1936,9 +1523,9 @@ def split_heredocs(command: str, powershell: bool = False) -> tuple[str, str]:
         text, pending, here_string = scan_line(line, reading, powershell)
         kept.append(text)
     if reading.quote and reading.quote != "<#" or reading.stack:
-        raise Unparsed("a quote, `$(` or backtick that never closes")
+        raise Unclosed("a quote, `$(` or backtick that never closes")
     if reading.quote:
-        raise Unparsed("a `<#` comment that never closes")
+        raise Unclosed("a `<#` comment that never closes")
     return "\n".join(kept), "\n".join(expanded)
 
 
@@ -1989,7 +1576,7 @@ def closing_paren(command: str, start: int, powershell: bool) -> int:
                     raise Unparsed("a `case` inside `$( … )`, whose parentheses the guard cannot pair")
                 return index
         index += 1
-    raise Unparsed("a `(` that never closes")
+    raise Unclosed("a `(` that never closes")
 
 
 def arithmetic_end(command: str, index: int, powershell: bool) -> int | None:
@@ -2071,7 +1658,7 @@ def lift_substitutions(command: str, powershell: bool, quoting: bool = True) -> 
             while end > 0 and command[end - 1] == "\\":
                 end = command.find("`", end + 1)
             if end < 0:
-                raise Unparsed("a backtick that never closes")
+                raise Unclosed("a backtick that never closes")
             lift(command[index + 1:end].replace("\\`", "`"))
             index = end + 1
         elif powershell and not quote and char in "{}":
@@ -2101,7 +1688,7 @@ ANSI_C_NUMBER = re.compile(r"([0-7]{1,3})|x([0-9A-Fa-f]{1,2})|u([0-9A-Fa-f]{1,4}
 
 def ansi_c(text: str, start: int) -> tuple[str, int]:
     """The value of bash's `$'…'` whose `$` is at `start`, and the index past its closing quote. Inside
-    it `\\'` is a quote, not its end — a way round the guard that has been closed."""
+    it `\\'` is a quote, not its end — the way round the guard that ."""
     value: list[str] = []
     index = start + 2
     while index < len(text):
@@ -2128,7 +1715,7 @@ def ansi_c(text: str, start: int) -> tuple[str, int]:
             continue
         value.append(char)
         index += 1
-    raise Unparsed("a `$'` string that never closes")
+    raise Unclosed("a `$'` string that never closes")
 
 
 def brace_expansion(text: str, start: int) -> bool:
@@ -2174,7 +1761,7 @@ def normalize_bash(text: str) -> str:
         elif char == "'":
             end = text.find("'", index + 1)
             if end < 0:
-                raise Unparsed("a quote that never closes")
+                raise Unclosed("a quote that never closes")
             out.append(quoted(mark(c) for c in text[index + 1:end]))
             index = end + 1
         elif char == '"':
@@ -2182,7 +1769,7 @@ def normalize_bash(text: str) -> str:
             index += 1
             while True:
                 if index >= size:
-                    raise Unparsed("a quote that never closes")
+                    raise Unclosed("a quote that never closes")
                 inside = text[index]
                 if inside == '"':
                     break
@@ -2232,7 +1819,7 @@ def normalize_powershell(text: str) -> str:
             index += 1
             while True:
                 if index >= size:
-                    raise Unparsed("a quote that never closes")
+                    raise Unclosed("a quote that never closes")
                 if text[index] == "'":
                     if text.startswith("'", index + 1):  # `''` is a quote inside the string
                         value.append("'")
@@ -2248,7 +1835,7 @@ def normalize_powershell(text: str) -> str:
             index += 1
             while True:
                 if index >= size:
-                    raise Unparsed("a quote that never closes")
+                    raise Unclosed("a quote that never closes")
                 inside = text[index]
                 if inside == "`" and index + 1 < size:
                     following = text[index + 1]
@@ -2391,13 +1978,13 @@ ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # Builtins that set the variables after them: `export X=requirements` sets X as `X=requirements` does.
 DECLARERS = frozenset({"export", "local", "declare", "typeset", "readonly"})
 # xargs's options, read as GNU getopt reads them; the first word after them is the command. Short options cluster
-# (`-0I{}`, `-rI @`): a letter that takes a value takes the rest of the word, or else the next word (once: only a
+# (`-0I{}`, `-rI @`): a letter that takes a value takes the rest of the word, or else the next word (only a
 # word starting `-I` or `-i` was read as naming the replace string, so `xargs -0I{} rm -rf {}/../x` passed).
 XARGS_LETTERS_WITH_VALUE = frozenset("adEILnPs")
 # These take a value only written in the same word (`-i@`, `-l5`); `-i` alone replaces `{}`.
 XARGS_LETTERS_OPTIONAL_VALUE = frozenset("eil")
 # Long options, which getopt also accepts shortened (`--repl`): True takes a value (`--max-args 1` or `=1`), False
-# takes one only as `=value` (once: `--replace` read as taking the next word, `xargs --replace rm -rf {}` ran `-rf`),
+# takes one only as `=value` (`--replace` read as taking the next word, `xargs --replace rm -rf {}` ran `-rf`),
 # None takes none.
 XARGS_LONG_OPTIONS: dict[str, bool | None] = {
     "arg-file": True, "delimiter": True, "max-args": True, "max-procs": True, "max-chars": True,
@@ -2421,7 +2008,7 @@ class Unwrapped:
 
 def unwrap(plain: list[str], raw: list[str], cwd: str, repo: Repo, powershell: bool) -> Unwrapped:
     """Drop leading NAME=value assignments, shell keywords, and wrappers like rtk, env or sudo — with each
-    wrapper's own options and their values (once: `env -u X git push …` runs git) — and xargs."""
+    wrapper's own options and their values (`env -u X git push …` runs git) — and xargs."""
     plain, raw = list(plain), list(raw)
     result = Unwrapped([], [], cwd, findings=[])
     index, saw_env = 0, False
@@ -2522,9 +2109,126 @@ def xargs_option(plain: list[str], index: int, result: Unwrapped) -> int:
     return index + 1
 
 
+# rclone's commands, so its first word that names one is the command (`rclone -v delete x:`): an option's
+# value is never one of these.
+RCLONE_COMMANDS = frozenset({
+    "about", "authorize", "backend", "bisync", "cat", "check", "checksum", "cleanup", "completion", "config",
+    "copy", "copyto", "copyurl", "cryptcheck", "cryptdecode", "dedupe", "delete", "deletefile", "genautocomplete",
+    "gitannex", "hashsum", "help", "link", "listremotes", "ls", "lsd", "lsf", "lsjson", "lsl", "md5sum", "mkdir",
+    "mount", "move", "moveto", "ncdu", "nfsmount", "obscure", "purge", "rc", "rcat", "rcd", "rmdir", "rmdirs",
+    "selfupdate", "serve", "settier", "sha1sum", "size", "sync", "test", "touch", "tree", "version"})
+# A remote path: `gdrive:…`, `gdrive,shared_with_me:…`, an on-the-fly `:drive:…`. Never `C:\…` (one letter).
+RCLONE_REMOTE = re.compile(r"^(?::[A-Za-z]\w*|\w[\w.\-]+)(?:,[^:/\\]*)?:")
+
+
+def rclone_findings(args: list[str]) -> list[Finding]:
+    """An rclone command that deletes, trashes or moves away what is on a remote (H4): the FE guides' Docs are
+    updated in place by /publish-guides and never removed by a session. A dry run changes nothing."""
+    deleting = rules().rclone_deleting
+    if not deleting:
+        return []
+    words = [arg for arg in args if not arg.startswith("-")]
+    at = next((index for index, word in enumerate(words) if word.lower() in RCLONE_COMMANDS | set(deleting)), None)
+    if at is None or any(arg in ("-n", "--dry-run") or (arg.startswith("--dry-run=") and
+                                                         arg.split("=", 1)[1].lower() not in ("false", "0"))
+                         for arg in args):
+        return []
+    command, remote = words[at].lower(), [bool(RCLONE_REMOTE.match(path)) for path in words[at + 1:]]
+    # `moveto gdrive:a.md gdrive:b.md` renames in place, as /publish-guides does; a move off the remote, or
+    # `move` into another folder, takes the Doc away.
+    if (command in deleting and any(remote)) or (
+            command in ("move", "moveto") and remote[:1] == [True] and (command == "move" or remote[1:2] != [True])):
+        return [Finding("drive-write", DENY, f"`rclone {command}` here deletes or moves away files on a remote. "
+                                             f"{rules().drive_reason} A `--dry-run` is allowed.", None)]
+    return []
+
+
+# How a package is installed, or a tool fetched and run, by name: the words before its package names.
+PACKAGE_INSTALLERS = (("pip", "install"), ("pip", "download"), ("pipx", "install"), ("pipx", "inject"),
+                      ("uv", "pip", "install"), ("uv", "tool", "install"), ("uv", "add"), ("poetry", "add"),
+                      ("conda", "install"), ("npm", "install"), ("npm", "i"), ("npm", "add"), ("pnpm", "add"),
+                      ("yarn", "add"), ("dotnet", "tool", "install"), ("winget", "install"), ("choco", "install"),
+                      ("scoop", "install"), ("brew", "install"))
+TOOL_RUNNERS = (("pipx", "run"), ("uvx",), ("uv", "tool", "run"), ("uv", "run"), ("npx",), ("pnpm", "dlx"))
+PIPS = re.compile(r"^pip(3(\.\d+)?)?$")
+
+
+def package_name(word: str) -> str:
+    """`graphify[all]==1.2` is `graphify`; `git+https://…/graphify.git` is `graphify`."""
+    word = word.rstrip("/").rsplit("/", 1)[-1].lower()
+    word = word[:-4] if word.endswith(".git") else word
+    return re.split(r"[\[=<>!~@;, ]", word, maxsplit=1)[0]
+
+
+def banned_tool_findings(name: str, args: list[str]) -> list[Finding]:
+    """Installing or running a tool this repository decided against (H12): `[[guard.banned_tools]]`."""
+    banned = rules().banned_tools
+    if not banned:
+        return []
+    words = [name] + [arg.lower() for arg in args]
+    if PIPS.match(name):
+        words[0] = "pip"
+    elif PYTHONS.match(name) and words[1:3] == ["-m", "pip"]:
+        words = ["pip"] + words[3:]
+    elif PYTHONS.match(name) and words[1:2] == ["-m"] and len(words) > 2:
+        words = [words[2].split(".", 1)[0]]  # `python -m graphify.cli` runs graphify
+    named: list[str] = [program(words[0])]
+    for lead in PACKAGE_INSTALLERS + TOOL_RUNNERS:
+        if tuple(words[:len(lead)]) == lead:
+            rest = [word for word in words[len(lead):] if not word.startswith("-")]
+            named += [package_name(word) for word in (rest[:1] if lead in TOOL_RUNNERS else rest)]
+            break
+    for globs, reason in banned:
+        hit = next((word for word in named if any(fnmatch.fnmatchcase(word, glob) for glob in globs)), None)
+        if hit:
+            return [Finding("banned-tool", DENY, f"`{hit}` {reason}", None)]
+    return []
+
+
+def drive_connector_findings(tool: str) -> list[Finding]:
+    """A Google Drive connector's tool that would create, change, move or trash a file (H4). Its read tools
+    pass: one whose own name starts with a read verb (`read_file_content`, `searchFiles`)."""
+    if not rules().drive_connector.search(tool):
+        return []
+    own = tool.rsplit("__", 1)[-1]
+    verb = re.match(r"[A-Za-z][a-z]*", own)
+    if verb and verb.group(0).lower() in rules().drive_read_verbs:
+        return []
+    return [Finding("drive-write", DENY, f"`{own}` would change Google Drive. {rules().drive_reason}", None)]
+
+
 def program(token: str) -> str:
     name = token.replace("\\", "/").rsplit("/", 1)[-1].lower()
     return name[:-4] if name.endswith(".exe") else name
+
+
+PYTHONS = re.compile(r"^(python|python3(\.\d+)?|py)$")
+
+
+def factory_deploy_target(name: str, args: list[str]) -> str | None:
+    """
+    The environment a `python …/factory.py deploy …` command names, upper-cased — `DEV` when it names
+    none, as deploy.py defaults — or None when the command is not a factory deploy.
+    """
+    if not PYTHONS.match(name):
+        return None
+    scripts = [i for i, arg in enumerate(args) if arg.replace("\\", "/").rsplit("/", 1)[-1].lower() == "factory.py"]
+    if not scripts or "deploy" not in args[scripts[0] + 1:]:
+        return None
+    rest = args[scripts[0] + 1:]
+    # `deploy status --target dev|qa|all` reads what is deployed; it names environments too, and
+    # anything but those three is refused like an --env outside DEV and QA. `all` is DEV and QA.
+    target = flag_value(rest, "--target")
+    if target is None and any(arg.startswith("--t") and arg != "--target" for arg in rest):
+        return "?"
+    value = flag_value(rest, "--env")
+    if value is None and any(arg.startswith("--e") and arg != "--env" for arg in rest):
+        return "?"  # an abbreviation: deploy.py refuses it, and the guard does not guess what it meant
+    env = (value or "DEV").strip().upper()
+    if target is not None and target.strip().upper() != "ALL":
+        # Both flags given: an --env outside DEV and QA is judged even beside a --target.
+        return env if value is not None and env not in ("DEV", "QA") else target.strip().upper()
+    return env
 
 
 def flag_value(args: list[str], *names: str) -> str | None:
@@ -2585,9 +2289,9 @@ def git_findings(args: list[str], cwd: str, repo: Repo) -> list[Finding]:
         return any(re.match(r"^-[A-Za-z]+$", arg) and letter in arg[1:] for arg in rest)
 
     # Pointing core.hooksPath elsewhere skips the hooks as surely as --no-verify (the review's LOW-2).
-    # Setting it to the project's own hooks folder is its setup step, and reading it is harmless.
+    # Setting it to the project's own .githooks is the README's setup step, and reading it is harmless.
     def elsewhere(value: str) -> bool:
-        return not project_hooks_folder(value, repo)
+        return value.strip("\"'").rstrip("/").lower() not in PROJECT_HOOKS
 
     moves_hooks = any(args[i] == "-c" and args[i + 1].lower().startswith("core.hookspath=")
                       and elsewhere(args[i + 1].split("=", 1)[1]) for i in range(min(index, len(args) - 1)))
@@ -2622,9 +2326,8 @@ def git_findings(args: list[str], cwd: str, repo: Repo) -> list[Finding]:
         findings.append(Finding(
             "no-verify", DENY, "Never skip the git hooks. If a hook fails, fix what it found.", None))
 
-    # `git show/log/diff --output=<file>` writes the file — and those commands are pre-approved for
-    # the unattended session, so the run file's Record or a locked test could be rewritten past every
-    # other rule (the fourth review). No step needs git to write a file; the file tools do that.
+    # `git show/log/diff --output=<file>` writes the file, past every rule on what may change. Nothing
+    # needs git to write a file; the file tools do that, and the rules see them.
     writes_output = any(arg.split("=", 1)[0] in OUTPUT_OPTIONS for arg in rest) or (
         sub == "format-patch" and any(arg == "-o" or arg.startswith("-o") and len(arg) > 2 for arg in rest))
     if writes_output:
@@ -2633,7 +2336,7 @@ def git_findings(args: list[str], cwd: str, repo: Repo) -> list[Finding]:
             "git writes a file with --output. Read with git; write files with the file tools.", None))
 
     if sub in ("rm", "mv"):
-        # git rm and git mv write the paths they name: a snapshot or a locked test removed by `git rm` is still removed.
+        # git rm and git mv write the paths they name: a snapshot removed by `git rm` is still removed.
         targets = [arg for arg in rest if not arg.startswith("-")]
         known = [expanded_targets(target, cwd) for target in targets]
         if any(each is None for each in known):
@@ -2643,20 +2346,17 @@ def git_findings(args: list[str], cwd: str, repo: Repo) -> list[Finding]:
             # `git mv <source>… <destination>`: the destination receives; only the sources move whole.
             if sub == "mv" and index == len(targets) - 1 and len(targets) > 1:
                 rel = relative_to_root(target, cwd, repo.root)
-                findings += path_findings(rel, repo, through_shell=True) if rel else []
+                findings += path_findings(rel, repo) if rel else []
                 continue
             rel = whole_target(target, cwd, repo.root, pathspec=True)
             if rel:
-                findings += path_findings(rel, repo, through_shell=True, whole_folder=True)
+                findings += path_findings(rel, repo, whole_folder=True)
 
     # Commands that put older content back write their paths too: `git checkout <rev> -- <snapshot>`
-    # changes a read-only file as surely as an edit, and restoring the run file from an earlier commit
-    # emptied its lock (the re-review's HIGH-2).
-    restored, whole_tree, from_revision = git_restored_paths(sub, rest, cwd, repo)
+    # changes a read-only file as surely as an edit.
+    restored, from_revision = git_restored_paths(sub, rest, cwd, repo)
     for rel in restored:
-        findings += path_findings(rel, repo, through_shell=True, whole_folder=from_revision)
-    if whole_tree:
-        findings += whole_tree_findings(repo)
+        findings += path_findings(rel, repo, whole_folder=from_revision)
 
     findings += tracking_findings(sub, rest)
     # A mirror remote pushes every branch, dev included, on a bare `git push <remote>`.
@@ -2670,7 +2370,13 @@ def git_findings(args: list[str], cwd: str, repo: Repo) -> list[Finding]:
     elif sub in ("commit", "merge", "rebase", "cherry-pick", "revert", "am"):
         known = repo.knows(cwd)
         branch = repo.current_branch(cwd if known else None)
-        if branch in rules().protected_branches:
+        other = repo.other_repository(cwd if known else None)
+        if other and branch in rules().protected_branches:
+            findings.append(other_repository_finding(other, branch))
+        elif branch in rules().protected_branches and fast_forwards_to_own_remote(sub, rest, branch):
+            # Moving dev to origin/dev creates no commit: it takes what pull requests already merged.
+            pass
+        elif branch in rules().protected_branches:
             findings.append(Finding(
                 "commit-protected-branch", DENY,
                 f"The checkout is on {branch}, which is reached by pull request only. "
@@ -2678,6 +2384,30 @@ def git_findings(args: list[str], cwd: str, repo: Repo) -> list[Finding]:
         elif not known:
             findings.append(UNKNOWN_CHECKOUT_FINDING)
     return findings
+
+
+FAST_FORWARD_QUIET_FLAGS = ("-q", "--quiet")
+
+
+def other_repository_finding(top: str, branches: str | None) -> Finding:
+    return Finding(
+        "other-repository", ASK,
+        f"This works on {branches} in another git repository ({top}). This project's branch rules are not "
+        "that repository's, so a person decides.", None)
+
+
+def fast_forwards_to_own_remote(sub, rest, branch):
+    """`git merge --ff-only origin/<branch>` on that branch: it can only move to commits already there.
+
+    Exactly that shape. Any other flag, a second ref, or another branch's ref is still a merge.
+    """
+    if sub != "merge" or "--ff-only" not in rest:
+        return False
+    flags = [arg for arg in rest if arg.startswith("-")]
+    refs = [arg for arg in rest if not arg.startswith("-")]
+    if any(flag != "--ff-only" and flag not in FAST_FORWARD_QUIET_FLAGS for flag in flags):
+        return False
+    return refs == [f"origin/{branch}"]
 
 
 # Settings whose value git runs as a command, or that pull in another file of settings: one set with
@@ -2747,7 +2477,7 @@ GIT_COMMAND_IN_ENV = re.compile(r"^(GIT_SSH|GIT_SSH_COMMAND|GIT_PAGER|GIT_EDITOR
 
 
 # PowerShell's names for an environment variable: `$env:X`, `${env:X}`, and the item `env:X` — with `=value` attached
-# when written without spaces (once: `$env:GIT_CONFIG_PARAMETERS="…"` set a push refspec unseen).
+# when written without spaces (`$env:GIT_CONFIG_PARAMETERS="…"` set a push refspec unseen).
 ENVIRONMENT_WORD = re.compile(r"^(?:\$\{env:([A-Za-z_]\w*)\}|\$env:([A-Za-z_]\w*)|env:([A-Za-z_]\w*))(?:[-+]?=(.*))?$",
                               re.IGNORECASE | re.DOTALL)
 ENVIRONMENT_SETTERS = frozenset({"set-item", "si", "new-item", "ni"})
@@ -2828,7 +2558,7 @@ def tracking_findings(sub: str, rest: list[str]) -> list[Finding]:
     if "--no-track" in rest:
         return []
     message = ("Cut work branches from a protected branch with --no-track, so a push cannot land on it: "
-               f"`git checkout --no-track -b <branch> {rules().base_ref}`.")
+               "`git checkout --no-track -b <branch> origin/dev`.")
     sets_upstream = any(arg.startswith("--set-upstream-to") for arg in rest) or "-u" in rest
     targets = [arg.split("=", 1)[1] if arg.startswith("--set-upstream-to=") else arg for arg in rest]
     if sub == "branch" and sets_upstream and any(protected_remote(t) for t in targets):
@@ -2850,13 +2580,12 @@ WHOLE_TREE = frozenset({".", ":/", "*", "./"})
 GIT_OPTIONS_WITH_VALUE = frozenset({"-s", "--source", "-b", "-B", "--orphan", "-m", "--message", "--pathspec-from-file"})
 
 
-def git_restored_paths(sub: str, rest: list[str], cwd: str, repo: Repo) -> tuple[list[str], bool, bool]:
+def git_restored_paths(sub: str, rest: list[str], cwd: str, repo: Repo) -> tuple[list[str], bool]:
     """
-    The paths a checkout, restore, stash, apply or hard reset writes in the working tree, whether it
-    writes the whole tree, and whether they come from a revision. Only content from a revision can change
-    a protected file that was never touched, so only then is a folder, `.` or a glob judged by everything
-    it holds; `git checkout -- .` alone puts back what is already committed. Branch switches and
-    staged-only restores write nothing here.
+    The paths a checkout, restore or stash names in the working tree, and whether they come from a
+    revision. Only content from a revision can change a protected file that was never touched, so only
+    then is a folder, `.` or a glob judged by everything it holds; `git checkout -- .` alone puts back
+    what is already committed. Branch switches and staged-only restores write nothing here.
     """
     def positional(args: list[str]) -> list[str]:
         values, skip = [], False
@@ -2869,24 +2598,15 @@ def git_restored_paths(sub: str, rest: list[str], cwd: str, repo: Repo) -> tuple
                 values.append(arg)
         return values
 
-    def resolve(targets: list[str], from_revision: bool) -> tuple[list[str], bool, bool]:
+    def resolve(targets: list[str], from_revision: bool) -> tuple[list[str], bool]:
         known = [expanded_targets(target, cwd) for target in targets]
         targets = [each[0] for each in known if each]
-        # Paths the command line cannot show — a file of them, or one built when it runs — are the whole tree.
-        hidden_paths = any(arg.startswith("--pathspec-from-file") for arg in rest) or None in known
-        whole = any(target in WHOLE_TREE for target in targets) or hidden_paths
         if from_revision:
-            if hidden_paths:
+            # Paths the command line cannot show — a file of them, or one built when it runs — are the whole tree.
+            if any(arg.startswith("--pathspec-from-file") for arg in rest) or None in known:
                 targets = [*targets, "."]
-            return [rel for target in targets if (rel := whole_target(target, cwd, repo.root, pathspec=True))], whole, True
-        rels = [rel for target in targets if target not in WHOLE_TREE and (rel := relative_to_root(target, cwd, repo.root))]
-        # A folder or a glob writes every held path under or matching it: `git checkout HEAD~1 --
-        # docs/factory/runs` restored the run file the exact-path test missed (the third review).
-        held = held_paths(repo)
-        covered = [path for spec in rels for path in held
-                   if path != spec and (path.startswith(spec.rstrip("/") + "/")
-                                        or (any(ch in spec for ch in "*?[") and fnmatch.fnmatch(path, spec)))]
-        return rels + covered, whole, False
+            return [rel for target in targets if (rel := whole_target(target, cwd, repo.root, pathspec=True))], True
+        return [rel for target in targets if (rel := relative_to_root(target, cwd, repo.root))], False
 
     after_dashes = rest[rest.index("--") + 1:] if "--" in rest else None
     before_dashes = rest[:rest.index("--")] if "--" in rest else rest
@@ -2894,65 +2614,26 @@ def git_restored_paths(sub: str, rest: list[str], cwd: str, repo: Repo) -> tuple
         if after_dashes is not None:
             return resolve(after_dashes, bool(positional(before_dashes)))  # `git checkout <rev> -- <paths…>`
         if any(arg in ("-b", "-B", "--orphan", "-") for arg in rest):
-            return [], False, False
+            return [], False
         values = positional(rest)
         if len(values) > 1 or (values and any(arg.startswith("--pathspec-from-file") for arg in rest)):
             return resolve(values[1:], True)  # `git checkout <rev> <paths…>`
         if values and (values[0] in WHOLE_TREE or ((rel := relative_to_root(values[0], cwd, repo.root))
                                                    and repo.exists(rel))):
             return resolve(values, False)  # `git checkout <path>` — a path, not a branch
-        return [], False, False
+        return [], False
     if sub == "restore":
         if "--staged" in rest and not any(arg in ("--worktree", "-W") for arg in rest):
-            return [], False, False
+            return [], False
         source = any(arg in ("-s", "--source") or arg.startswith("--source=") or (arg.startswith("-s") and len(arg) > 2)
                      for arg in before_dashes)
         return resolve(after_dashes if after_dashes is not None else positional(rest), source)
     if sub == "stash":
         verb = rest[0] if rest and not rest[0].startswith("-") else "push"
         if verb in ("list", "show", "drop", "clear", "create", "store", "branch"):
-            return [], False, False
-        if after_dashes:
-            return resolve(after_dashes, False)
-        return [], True, False
-    if sub == "apply":
-        return [], not any(arg in ("--check", "--stat", "--numstat", "--summary", "--cached") for arg in rest), False
-    if sub == "reset":
-        return [], any(arg in ("--hard", "--merge", "--keep") for arg in rest), False
-    if sub in ("revert", "cherry-pick"):
-        # Uncommitted, they leave whatever they change in the working tree — any path at all.
-        return [], any(arg in ("-n", "--no-commit") for arg in rest), False
-    return [], False, False
-
-
-def held_paths(repo: Repo) -> list[str]:
-    """What the open runs hold: their run files and every locked test."""
-    view = repo.factory_view()
-    if view is None:
-        return []
-    if view.unreadable:
-        files = [view.unreadable] if "/" in view.unreadable and "," not in view.unreadable else []
-        return files + sorted(view.lock)
-    return sorted(view.run_texts()) + sorted(view.lock)
-
-
-def whole_tree_findings(repo: Repo) -> list[Finding]:
-    """A command that rewrites the whole working tree writes every run file and every locked test."""
-    view = repo.factory_view()
-    if view is None:
-        return []
-    if view.unreadable:
-        target = view.unreadable if "," not in view.unreadable else f"{rules().runs_dir}/R-000.md"
-        return path_findings(target, repo, through_shell=True)
-    findings: list[Finding] = []
-    for rel in held_paths(repo):
-        findings += path_findings(rel, repo, through_shell=True)
-    return findings
-
-
-def protected_names() -> str:
-    """`protected_branches` for a message: "dev, main"."""
-    return ", ".join(sorted(rules().protected_branches)) or "the protected branches"
+            return [], False
+        return resolve(after_dashes, False) if after_dashes else ([], False)
+    return [], False
 
 
 def push_findings(rest: list[str], cwd: str, repo: Repo) -> list[Finding]:
@@ -2966,12 +2647,12 @@ def push_findings(rest: list[str], cwd: str, repo: Repo) -> list[Finding]:
             "branch-delete", DENY, "Never delete a branch, locally or on the remote.", None))
     if any(flag in ("--all", "--mirror", "--branches") for flag in flags) or any("*" in ref for ref in refspecs):
         findings.append(Finding(
-            "push-protected-branch", DENY,
-            f"--all, --mirror and a `*` refspec push to every branch, {protected_names()} among them.", None))
+            "push-protected-branch", DENY, "--all, --mirror and a `*` refspec push to dev, qa, uat and main.", None))
 
     # Which checkout's branch HEAD means: one the guard cannot name is not the root's.
     known = repo.knows(cwd)
     here = cwd if known else None
+    other = repo.other_repository(here)
     targets: list[str] = []
     for ref in refspecs:
         destination = ref.lstrip("+").split(":", 1)[-1]
@@ -2982,11 +2663,14 @@ def push_findings(rest: list[str], cwd: str, repo: Repo) -> list[Finding]:
     if not refspecs:
         targets += [repo.current_branch(here) or "", repo.upstream_branch(here) or ""]
     protected = sorted({target for target in targets if target in rules().protected_branches})
-    if protected:
+    if protected and other:
+        findings.append(other_repository_finding(other, ", ".join(protected)))
+        protected = []
+    elif protected:
         findings.append(Finding(
             "push-protected-branch", DENY,
-            f"This push would land on {', '.join(protected)}, a protected branch: it changes through a pull "
-            "request (or promotion) only.", None))
+            f"This push would land on {', '.join(protected)}. dev takes pull requests only; "
+            "qa, uat and main are reached by promotion.", None))
     elif not known and (not refspecs or any(ref.lstrip("+").split(":", 1)[-1] in ("HEAD", "@") for ref in refspecs)):
         findings.append(UNKNOWN_CHECKOUT_FINDING)
 
@@ -3003,7 +2687,7 @@ def dotnet_ef_findings(args: list[str]) -> list[Finding]:
     if any(arg in ("-s", "--startup-project") or arg.startswith("--startup-project=") for arg in args):
         findings.append(Finding(
             "ef-startup-project", DENY,
-            "Never pass --startup-project to dotnet ef — the project's own design-time factory is the "
+            "Never pass --startup-project to dotnet ef — the design-time factory in Persistence is the "
             "one that refuses a non-local host.", None))
     connection = flag_value(args, "--connection")
     if connection:
@@ -3012,7 +2696,7 @@ def dotnet_ef_findings(args: list[str]) -> list[Finding]:
             findings.append(Finding(
                 "ef-remote-database", DENY,
                 "dotnet ef points at a database that is not on this machine. Migrations reach shared "
-                "databases through the project's deployment only.", None))
+                "databases through the migrate container only.", None))
     if len(args) >= 2 and args[0] == "database" and args[1] == "drop":
         findings.append(Finding(
             "ef-database-drop", ASK, "Dropping a database. A person confirms which one.", None))
@@ -3065,10 +2749,6 @@ def write_targets(name: str, args: list[str]) -> list[str]:
         return [posixpath.join(paths[0] if paths else ".", child)] if name in ("new-item", "ni") and child else paths
     if name in WRITES_ALL_ARGS:
         return positional
-    if name == "ln":
-        # A link, hard or symbolic, makes its source writable under another name: every file it names is written to,
-        # not only the link (the 15 Oct review's #7). `-t <dir>`'s folder is among them, as the destination.
-        return positional
     if name in WRITES_DESTINATION:
         destination = flag_value(args, "-Destination", "-destination", "--target-directory", "-t")
         return [destination] if destination else positional[-1:]
@@ -3087,13 +2767,10 @@ def redirect_targets(argv: list[str]) -> list[str]:
     ]
 
 
-FACTORY_OPTIONS_WITH_VALUE = ("--run",)
-
-
 # ---------------------------------------------------------------- write targets built when they run
 #
 # A write target holding a variable is judged on what the variable holds only when the guard can read that
-# plainly; otherwise it is refused as `hidden-command`, with how to write it plainly. Experience taught the
+# plainly; otherwise it is refused as `hidden-command`, with how to write it plainly. 
 # guard to follow every assignment, loop and glob, and a review found the ways round that modelling at once
 # (`read X`, `X+=…`, an array, a reassignment in a branch, a value the shell splits). So the guard now models
 # less and refuses more: a variable is trusted only when the command line sets it exactly once, plainly, and
@@ -3543,9 +3220,7 @@ def run_time_findings(text: str, safe: bool, cwd: str, repo: Repo, whole: bool) 
     rel = whole_target(pattern, cwd, repo.root)
     if rel is None:
         return claude_settings_findings(pattern, cwd, folder_too=True)
-    if whole:
-        return path_findings(rel, repo, through_shell=True, whole_folder=True)
-    return path_findings(rel, repo, through_shell=True) + glob_findings(rel, repo, unknown=True)
+    return path_findings(rel, repo, whole_folder=True) if whole else glob_findings(rel, repo, unknown=True)
 
 
 def write_path_findings(target: str, cwd: str, repo: Repo, whole: bool = False, raw: str | None = None,
@@ -3570,10 +3245,9 @@ def written_path_findings(target: str, cwd: str, repo: Repo, whole: bool) -> lis
     findings = git_config_file_findings(target, cwd)
     # A glob is kept as one, from the folder it starts in, so path_findings can judge what it matches.
     globbed = any(char in target for char in "*?[")
-    owner = other_worktree(target, cwd, repo) or repo  # another worktree's file keeps its own runs' locks
-    rel = whole_target(target, cwd, owner.root) if whole or globbed else relative_to_root(target, cwd, owner.root)
+    rel = whole_target(target, cwd, repo.root) if whole or globbed else relative_to_root(target, cwd, repo.root)
     if rel:
-        findings += path_findings(rel, owner, through_shell=True, whole_folder=whole)
+        findings += path_findings(rel, repo, whole_folder=whole)
         if not isinstance(cwd, UnknownCwd):
             return findings
     return findings + claude_settings_findings(target, cwd, folder_too=True)
@@ -3592,50 +3266,9 @@ def change_dir(cwd: str, target: str, repo: Repo) -> str:
     return os.path.normpath(os.path.join(cwd, native))
 
 
-# The hooks folders core.hooksPath may name when `[guard] hooks_path` names none: `.githooks` (this repository's,
-# and the kit's), and husky's — `.husky` (husky 4–8) and `.husky/_` (husky 9's `prepare` step) — the latter only
-# where the base branch keeps a `.husky/` folder (DEFAULT_HOOKS_ON_BASE). A project with no husky hooks that
-# accepted `.husky` would let a session skip its hooks by pointing git at a folder that holds none.
-DEFAULT_HOOKS = (".githooks",)
-DEFAULT_HOOKS_ON_BASE = {".husky": ".husky", ".husky/_": ".husky"}
-
-
-def hooks_folder_name(value: str) -> str:
-    """A core.hooksPath value as a comparable folder: no quotes, no `./`, no trailing slash, lower case."""
-    text = value.strip("\"'").replace("\\", "/").rstrip("/").lower()
-    while text.startswith("./"):
-        text = text[2:]
-    return text
-
-
-def project_hooks_folder(value: str, repo: Repo) -> bool:
-    """
-    Whether core.hooksPath = `value` names this project's own hooks: what `[guard] hooks_path` lists, or
-    without it the defaults above. Any other folder is skipping the hooks. A path that leaves its folder
-    (`.husky/../tmp`) is not the folder.
-    """
-    name = hooks_folder_name(value)
-    if not name or ".." in name.split("/"):
-        return False
-    try:
-        configured = rules().hooks_path
-    except RulesUnavailable:
-        configured = ()
-    if configured:
-        return name in {hooks_folder_name(folder) for folder in configured}
-    if name in DEFAULT_HOOKS:
-        return True
-    folder = DEFAULT_HOOKS_ON_BASE.get(name)
-    return folder is not None and repo.on_base_folder(folder)
-SESSION_MARKERS = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
+PROJECT_HOOKS = frozenset({".githooks", "./.githooks"})
 HOOKS_PATH_IN_ENV = re.compile(r"^(GIT_CONFIG_KEY_\d+=core\.hookspath|GIT_CONFIG_PARAMETERS=.*core\.hookspath)",
                                re.IGNORECASE)
-MARKER_CLEARING_PROGRAMS = frozenset({
-    "unset", "export", "declare", "typeset", "local", "readonly",
-    "remove-item", "ri", "rm", "del", "erase", "clear-item", "set-item", "si", "remove-variable", "rv",
-})
-SET_ENV_CALL = re.compile(r"SetEnvironmentVariable\s*\(\s*['\"]?(" + "|".join(SESSION_MARKERS) + r")\b",
-                          re.IGNORECASE)
 POSIX_SHELLS = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
 POWERSHELL_HOSTS = frozenset({"pwsh", "powershell"})
 # pwsh's and powershell's own options that take a value; `-Command`, `-File` and `-EncodedCommand` are read apart.
@@ -3644,58 +3277,6 @@ POWERSHELL_HOST_OPTIONS_WITH_VALUE = ("-executionpolicy", "-windowstyle", "-work
                                       "-custompipename", "-configurationfile", "-ep", "-ex", "-wd", "-if", "-of")
 # `start /b x` and `start "" x` launch x (cmd's start, from bash): x is what is judged.
 LAUNCHERS = frozenset({"start"})
-
-
-def takes_a_value(option: str) -> bool:
-    """argparse accepts any unambiguous prefix: `--ru R-002` is `--run R-002` (the re-review)."""
-    return "=" not in option and len(option) >= len("--r") and any(o.startswith(option) for o in FACTORY_OPTIONS_WITH_VALUE)
-
-
-def is_person_only_factory_command(argv: list[str]) -> bool:
-    """The subcommand after factory.py — skipping options and the values they take, so
-    `factory.py --run R-002 approve spec` is still an approval (the review found it was not)."""
-    for index, token in enumerate(argv):
-        if program(token) not in ("factory", "factory.py"):
-            continue
-        rest = argv[index + 1:]
-        position = 0
-        while position < len(rest) and rest[position].startswith("-"):
-            position += 2 if takes_a_value(rest[position]) else 1
-        return position < len(rest) and rest[position] in PERSON_ONLY_COMMANDS
-    return False
-
-
-def marker_name(token: str) -> str:
-    """The variable a token names — `$env:CLAUDECODE`, `Env:CLAUDECODE`, `CLAUDECODE=` — upper-cased."""
-    name = token.split("=", 1)[0]
-    for prefix in ("$env:", "env:"):  # PowerShell's drive, in any case
-        if name.lower().startswith(prefix):
-            name = name[len(prefix):].lstrip("/\\")  # `Env:\CLAUDECODE` reaches here as `Env:/CLAUDECODE`
-    return name.upper()
-
-
-def tampers_with_session_marker(segment: list[str]) -> bool:
-    """Clearing or blanking CLAUDECODE is how a session would pass for a person's terminal."""
-    first = program(segment[0]) if segment else ""
-    for index, token in enumerate(segment):
-        if any(ch.isspace() for ch in token):
-            continue  # a quoted message or argument, not an assignment
-        name = marker_name(token)
-        following = segment[index + 1] if index + 1 < len(segment) else ""
-        if name in SESSION_MARKERS and ("=" in token or following.startswith("=")):
-            return True  # `CLAUDECODE=`, `$env:CLAUDECODE=''`, `$env:CLAUDECODE = $null`
-        if name in SESSION_MARKERS and first in MARKER_CLEARING_PROGRAMS:
-            return True  # unset, export -n, declare +x, Remove-Item Env:…
-        if token.startswith("--unset=") and marker_name(token[len("--unset="):]) in SESSION_MARKERS:
-            return True
-        if name in SESSION_MARKERS and index > 0 and segment[index - 1] in ("-u", "--unset", "unset"):
-            return True
-        if program(token) == "env" and following in ("-i", "--ignore-environment", "-"):
-            return True  # `env -i` clears every variable, the marker with them
-    return False
-
-
-
 # PowerShell's Start-Process: its program and its -ArgumentList are what runs.
 START_PROCESS = frozenset({"start-process", "saps", "start"})
 START_PROCESS_OPTIONS_WITH_VALUE = ("-filepath", "-argumentlist", "-workingdirectory", "-redirectstandardoutput",
@@ -3818,12 +3399,6 @@ def nested_findings(argv: list[str], raw: list[str], cwd: str, repo: Repo, depth
     return None
 
 
-SESSION_MARKER_FINDING = Finding(
-    "session-marker", ALWAYS,
-    "Clearing or blanking CLAUDECODE would make this session pass for a person's terminal. "
-    "A person's decisions are made from their own terminal.", None)
-
-
 def start_process_findings(argv: list[str], raw: list[str], cwd: str, repo: Repo, depth: int) -> list[Finding]:
     """PowerShell's `Start-Process <program> -ArgumentList …` runs the program with those arguments: they are
     judged as typed, or refused when built at run time."""
@@ -3876,6 +3451,11 @@ RUNS_TEXT = POSIX_SHELLS | POWERSHELL_HOSTS | EVALUATORS | POWERSHELL_EVALUATORS
 
 def hidden(reason: str) -> Finding:
     return Finding("hidden-command", DENY, f"{reason} The guard cannot see what it would run, so it refuses it.", None)
+
+
+def unparsed(reason: str) -> Finding:
+    """A command the guard could not read, as against one that hides what it runs: a person reads it."""
+    return Finding("unparsed-command", ASK, f"{reason} The guard could not read it, so a person decides.", None)
 
 
 def encoded_command(argv: list[str]) -> bool:
@@ -4003,7 +3583,7 @@ XARGS_INSIDE_WORD = ("xargs puts each path it is handed inside a longer word her
 FIND_CLIMBS = ("find hands each path it finds to a command that climbs out of it with `..`. Act on `{}` itself, or "
                "name the paths on the command itself.")
 # `-execdir` and `-okdir` run their command in each found item's folder, while the guard judges it from the working
-# one (once: `-execdir sh -c 'rm -rf ../Migrations'` and `-execdir git restore ../Migrations` passed). Only a
+# one (`-execdir sh -c 'rm -rf ../Migrations'` and `-execdir git restore ../Migrations` passed). Only a
 # reader, or a writer whose only path is `{}`, is judged as typed; anything else is refused.
 EXECDIR_READERS = CONTENT_SEARCHERS | frozenset({"cat", "head", "tail", "less", "more", "wc", "file", "ls", "stat",
                                                  "du", "md5sum", "sha1sum", "sha256sum", "echo", "printf", "basename",
@@ -4090,7 +3670,7 @@ def is_switch(parameter: str) -> bool:
 
 
 def colon_parameters(argv: list[str], raw: list[str]) -> tuple[list[str], list[str]]:
-    """PowerShell's `-Path:value` as `-Path value` (once: `Set-Content -Path:requirements/… -Value x` wrote past the
+    """PowerShell's `-Path:value` as `-Path value` (`Set-Content -Path:requirements/… -Value x` wrote past the
     path rules). A switch's `-Recurse:$true` is the switch alone."""
     words, raws = argv[:1], raw[:1]
     for word, raw_word in zip(argv[1:], raw[1:]):
@@ -4119,7 +3699,7 @@ def is_folder_target(landing: str, resolved: list[str], cwd: str, repo: Repo, so
                      named_by_option: bool) -> bool:
     """Whether a copy or move's destination is a folder the sources land in under their own names: written with a
     trailing slash, named by `-t`/`--target-directory`, the destination of several sources, or a folder now.
-    `resolved`: the paths the destination names once expanded (resolve_target) — once, `"$CLAUDE_PROJECT_DIR/docs"`
+    `resolved`: the paths the destination names once expanded (resolve_target) — `"$CLAUDE_PROJECT_DIR/docs"`
     was asked about unexpanded, read as no folder, and `cp x/database-erd.md "$CLAUDE_PROJECT_DIR/docs"` passed."""
     if named_by_option or sources > 1 or landing.endswith(("/", "\\")):
         return True
@@ -4132,10 +3712,10 @@ def is_folder_target(landing: str, resolved: list[str], cwd: str, repo: Repo, so
 
 def shell_findings(command: str, cwd: str, repo: Repo, powershell: bool, depth: int = 0) -> list[Finding]:
     if len(command) > MAX_COMMAND:
-        return [hidden(f"The command is over {MAX_COMMAND // 1024} KB, longer than the guard reads within its "
-                       "time limit.")]
+        return [unparsed(f"The command is over {MAX_COMMAND // 1024} KB, longer than the guard reads within its "
+                         "time limit.")]
     if depth > MAX_NESTING:
-        return [hidden("This nests commands deeper than the guard follows.")]
+        return [unparsed("This nests commands deeper than the guard follows.")]
     if depth == 0 and (any(mark in command for mark in GUARD_MARKS) or "__guard_substitution_" in command):
         return [hidden("The command holds the characters the guard uses to mark what it has read.")]
     if "\0" in command:
@@ -4147,14 +3727,13 @@ def shell_findings(command: str, cwd: str, repo: Repo, powershell: bool, depth: 
         outer, inner = lift_substitutions(kept, powershell)
         bodies = lift_substitutions(expanded, powershell, quoting=False)[1]
         tokens = tokenize(normalize(outer, powershell))
+    except Unclosed as error:
+        return [unparsed(f"The command has {error}.")]
     except Unparsed as error:
         return [hidden(f"The command has {error}.")]
     if any("\0" in token for token in tokens):
         return [hidden(NUL_FINDING_REASON)]  # `$'\x00'`
     findings = [finding for body in bodies for finding in shell_findings(body, cwd, repo, powershell, depth + 1)]
-    # Clearing CLAUDECODE would make this session pass for a person's terminal, in any spelling.
-    if SET_ENV_CALL.search(outer):
-        findings.append(SESSION_MARKER_FINDING)
     if powershell:
         findings += environment_read_findings(outer)
         set_by_dotnet = environment_setter_assignments(outer)
@@ -4201,8 +3780,6 @@ def shell_findings(command: str, cwd: str, repo: Repo, powershell: bool, depth: 
                 if int(number) < len(inner):
                     findings += shell_findings(inner[int(number)], cwd, repo, powershell, depth + 1)
         findings += environment_findings(segment)
-        if tampers_with_session_marker(segment):
-            findings.append(SESSION_MARKER_FINDING)
         if powershell and any(SCRIPT_BLOCK_BUILDERS.search(token) for token in segment):
             findings.append(hidden("A script block built from text runs that text."))
         if program(segment[0]) in ("set-alias", "sal", "new-alias", "nal") or (
@@ -4276,11 +3853,6 @@ def shell_findings(command: str, cwd: str, repo: Repo, powershell: bool, depth: 
                 cwd = change_dir(cwd, where, repo)
             continue
 
-        if is_person_only_factory_command(argv):
-            findings.append(Finding(
-                "gate-approval", ALWAYS,
-                "Approving a gate, unlocking a test, abandoning a run, opening its pull request, answering a question "
-                "and allowing a step new files are a person's decisions, made from their own terminal — never by the agent.", None))
         if name == "git":
             # `$(git branch --show-current)` is HEAD: the guard knows that answer.
             git_args = ["HEAD" if known_substitution(arg, inner, CURRENT_BRANCH) else arg for arg in args]
@@ -4291,14 +3863,16 @@ def shell_findings(command: str, cwd: str, repo: Repo, powershell: bool, depth: 
             findings += dotnet_ef_findings(args[1:])
         elif name == "dotnet-ef" and rules().dotnet_ef:
             findings += dotnet_ef_findings(args)
-        elif name == "pdftotext" and not pdftotext_prints(argv) and not (
-                args and set(args) <= {"-v", "-h", "-help", "--help", "-?"}):  # version or help: writes nothing
+        elif name == "pdftotext" and not pdftotext_prints(argv):
             # pdftotext writes its last argument, or `<input>.txt` beside the PDF without one. The FSD
-            # is read with it (/fsd-audit, /review-branch, the spec auditor), so it may only print:
-            # `pdftotext … <file> -`. A redirect is the shell's, not an argument: `pdftotext f.pdf - 2>&1` prints.
+            # is read with it (/book:fact-check, /book:self-review), so it may only print: `pdftotext … <file> -`.
+            # A redirect is the shell's, not an argument: `pdftotext f.pdf - 2>&1` prints.
             findings.append(Finding(
                 "pdftotext-output-file", DENY,
                 "pdftotext writes a file unless its last argument is `-`. Print to the terminal instead.", None))
+        elif name == "rclone":
+            findings += rclone_findings(args)
+        findings += banned_tool_findings(name, args)
 
         if name in ("ssh", "scp", "rsync", "az", "kubectl", "helm") or (
             name in ("docker", "docker-compose", "podman") and ("compose" in args or name == "docker-compose")
@@ -4306,8 +3880,15 @@ def shell_findings(command: str, cwd: str, repo: Repo, powershell: bool, depth: 
             if rules().non_dev_target.search(" ".join(args)):
                 findings.append(Finding(
                     "deploy-non-dev", DENY,
-                    "This names an environment `[guard] non_dev_targets` keeps out of reach (UAT or production, "
-                    "say). Deploying there goes through the team's release process, not a session.", None))
+                    "This names UAT or production. Deployment from here is DEV and QA only; the rest goes "
+                    "through the team's release process.", None))
+        elif factory_deploy_target(name, args) not in (None, "DEV", "QA"):
+            # `factory deploy` runs its ssh and compose inside its own process, where the check above never
+            # sees them: the environment it is given is the one word to judge. deploy.py refuses as well.
+            findings.append(Finding(
+                "deploy-non-dev", DENY,
+                "factory deploy targets DEV and QA only. UAT and production go through the team's release "
+                "process.", None))
 
         positional = [arg for arg in args if not arg.startswith("-")]
         raw_positional = [raw_arg for arg, raw_arg in zip(args, raw_args) if not arg.startswith("-")]
@@ -4337,7 +3918,7 @@ def shell_findings(command: str, cwd: str, repo: Repo, powershell: bool, depth: 
             elif fed and fed_paths is not None:
                 paths, where = fed_paths
                 copies = name in WRITES_DESTINATION or name in PIPE_COPIERS
-                # A copy or a move lands each path in its destination (once: a mover's destination went unjudged).
+                # A copy or a move lands each path in its destination (a mover's destination went unjudged).
                 if copies or name in PIPE_MOVERS:
                     sources_from_pipe = paths
                 for path in [] if copies else paths:
@@ -4406,6 +3987,8 @@ def evaluate(payload: dict, repo: Repo) -> list[Finding]:
         return read_tool_findings(tool, tool_input, cwd)
     if tool in FILE_TOOLS:
         return private_file_tool_findings(tool_input, cwd) + file_tool_findings(tool, tool_input, cwd, repo)
+    if tool.startswith("mcp__"):
+        return drive_connector_findings(tool)
     if tool in SHELL_TOOLS:
         try:
             return shell_findings(str(tool_input.get("command", "")), cwd, repo, powershell=tool == "PowerShell")
@@ -4420,7 +4003,7 @@ def decide(findings: list[Finding], mode: str) -> dict | None:
     """The hook's stdout, or None to allow silently."""
     if not findings:
         return None
-    refusals = [f for f in findings if f.level == ALWAYS or (f.level == DENY and mode == "enforce")]
+    refusals = [f for f in findings if f.level == DENY and mode == "enforce"]
     warnings = [f for f in findings if f.level == DENY and mode != "enforce"]
     questions = [f for f in findings if f.level == ASK]
 
@@ -4461,7 +4044,10 @@ def log(root: str, payload: dict, findings: list[Finding], mode: str,
         "mode": mode,
         "tool": payload.get("tool_name"),
         "session": payload.get("session_id"),
-        "findings": [{"rule": f.rule, "level": f.level, "path": f.path} for f in findings],
+        # The reason is the guard's own sentence, never the command's text, so a later count can say which
+        # of a rule's cases fire.
+        "findings": [{"rule": f.rule, "level": f.level, "path": f.path, "reason": f.reason[:REASON_LOGGED]}
+                     for f in findings],
         "commandSha256": hashlib.sha256(command.encode("utf-8")).hexdigest() if command else None,
     }
     try:
@@ -4505,8 +4091,8 @@ LAST_TOOL = [""]  # the tool of the call being judged, for did_not_run after a c
 def did_not_run(tool: str, why: str) -> dict:
     """
     The guard could not judge this call. It refuses anything that could write, run a command or reach
-    a protected file — a guard that fails open turns every rule off for the session (the harness
-    review) — and lets a plain read through with a note, so the session can still look at what broke.
+    a protected file — a guard that fails open turns every rule off for the session — and lets a plain
+    read through with a note, so the session can still look at what broke.
     A person repairs the guard; a session cannot route around it.
     """
     message = (f"guard: did not run — {why}. Reads still work; writes and commands are refused until a person "
@@ -4527,11 +4113,6 @@ def guard() -> int:
         return 0
     LAST_TOOL[0] = str(payload.get("tool_name", ""))
     root = find_root(payload)
-    if payload.get("hook_event_name") == "Stop":
-        blocked = stop_decision(payload, Repo(root))
-        if blocked is not None:
-            sys.stdout.write(json.dumps(blocked))
-        return 0
     mode = load_mode()
     try:
         findings = evaluate(payload, Repo(root))

@@ -1,0 +1,597 @@
+# Build, test and check every pull request and every merge to a long-lived branch.
+#
+# Every step runs on OUR runner, never Atlassian's cloud. Cloud steps bill build minutes,
+# doubled at `size: 2x`, against the whole workspace: a pipeline that runs on every push to every
+# branch can use tens of thousands of minutes in a month. So every step names `runs-on:
+# self.hosted` and a `max-time`, and no `default` pipeline runs on every push —
+# devtools/checks/check-pipeline.py fails the file otherwise. A step waiting for a runner that is
+# offline, or not yet set up, queues: it never falls back to the cloud. Never switch Pipelines back on
+# for cloud steps without IT's agreement (docs/architecture.md, CI).
+#
+# The integration tests need a PostgreSQL. Without one they SKIP SILENTLY — a
+# green run that never executed them looks identical to one that did. That is
+# the whole reason this pipeline exists, so every step that runs tests gets one.
+#
+# It is ONE PostgreSQL, as a pipeline service, with BOILERPLATE_TEST_DB pointing at it
+# — NOT Testcontainers, which is what the tests use on a developer's machine.
+# Testcontainers gave every test class its own container with a randomly
+# published port, and on Pipelines' Docker service a newly published port is
+# briefly routed to the wrong container: a class that had been passing on its
+# own database suddenly reads another class's empty schema ("relation
+# "countries" does not exist") until that container is deleted, then passes
+# again. 100 of 878 failed that way on pipeline #729 and the identical commit
+# passed on #728. Against one server the fixture gives each class a
+# uniquely named copy of a template migrated once per run
+# (TestDatabase.CreateDatabaseAsync), so classes run in parallel and nothing
+# publishes a port. Locally Testcontainers starts one container per run; CI
+# keeps the service, which publishes no port at all.
+image: mcr.microsoft.com/dotnet/sdk:10.0
+
+definitions:
+  caches:
+    nugetpackages: ~/.nuget/packages
+  services:
+    postgres:
+      image: postgres:18-alpine
+      variables:
+        POSTGRES_DB: app_tests
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+    # Every `docker build` runs inside this service, not the step's container, so
+    # its memory is what `dotnet publish` gets. Bitbucket's default is 1 GB, and
+    # at that the image build stalled compiling Persistence (its migrations are
+    # several MB of generated C#) until the step's time limit. 4 GB needs
+    # a 2x step: a 1x step's services may take at most 3 GB of its 4.
+    docker:
+      memory: 4096
+  steps:
+    - step: &build-and-test
+        name: Build and test
+        runs-on:
+          - self.hosted
+          - linux
+          - boilerplate.ci
+        # The integration suite took 54 minutes on a developer laptop (2026-10-09), so 90
+        # until the runner's own runs are measured, then about twice a healthy run.
+        max-time: 90
+        # 2x: 8 GB for the step. The integration test host peaks at ~2.8 GB
+        # (measured 2026-09-18, 893 tests, coverage on); at the default 4 GB,
+        # minus 1 GB for the PostgreSQL service, the host was OOM-killed around
+        # test 800 ("Test host process crashed"). Postgres itself peaks
+        # near 300 MB, so the service keeps its default allowance.
+        size: 2x
+        caches:
+          - nugetpackages
+        services:
+          - postgres
+        script:
+          - export DOTNET_CLI_TELEMETRY_OPTOUT=1
+          - export DOTNET_NOLOGO=1
+          # The service above, reached on localhost. The database name must
+          # hold "test" or "tests" as a whole _-separated lowercase word, as
+          # app_tests does — the fixture refuses anything else, because it
+          # drops the databases it creates. Password=postgres is the local
+          # convention and not a secret (CLAUDE.md, Security).
+          - export BOILERPLATE_TEST_DB="Host=localhost;Port=5432;Database=app_tests;Username=postgres;Password=postgres"
+          - dotnet restore Boilerplate.slnx
+          # Warnings are errors; this is where that is enforced for everyone.
+          - dotnet build Boilerplate.slnx --configuration Release --no-restore
+          # Unit and architecture tests here; the integration suite runs ONCE,
+          # in the next command, where its trx feeds the skip gate. Running it
+          # here as well doubled the step's time and its memory exposure.
+          # The integration project also holds the deployed-host smoke tests
+          # (Category=Smoke). They skip without their host, which only
+          # /deploy supplies. No Category=S3 test exists; one written later
+          # must skip without its simulator the same way. The run below excludes
+          # both, and the skip gate
+          # that follows sees only the in-process tests, where a skip is the lie.
+          - dotnet test Boilerplate.slnx --configuration Release --no-build --logger "console;verbosity=normal"
+            --logger "trx;LogFilePrefix=unit-arch"
+            --filter "FullyQualifiedName!~Boilerplate.IntegrationTests"
+            --collect:"XPlat Code Coverage" --results-directory ./coverage
+          # The skip gate, once per project: every test project but the
+          # integration one has exactly one trx that executed tests and skipped
+          # none. Written once in check-test-results.sh, which ci-local.sh runs too.
+          - sh devtools/checks/check-test-results.sh unit-arch coverage
+          # psql for the tests that run the hand-written SQL scripts the way an
+          # operator does (TenantScriptTests). Without it they skip,
+          # and the skip gate below fails the build — which is the point.
+          - apt-get update -qq && apt-get install -y -qq --no-install-recommends postgresql-client
+          # The service's database is thrown away with the step, so durability buys nothing:
+          # the throwaway settings the local Testcontainers database starts with.
+          # All three apply on a reload; a
+          # service cannot be restarted, so max_connections keeps its default. The second
+          # command fails the step if any of them did not take.
+          - PGPASSWORD=postgres psql -h localhost -U postgres -d app_tests -v ON_ERROR_STOP=1 -q
+            -c "ALTER SYSTEM SET fsync = off" -c "ALTER SYSTEM SET synchronous_commit = off"
+            -c "ALTER SYSTEM SET full_page_writes = off" -c "SELECT pg_reload_conf()"
+          - test "$(PGPASSWORD=postgres psql -h localhost -U postgres -d app_tests -tA -c "SELECT count(*) FROM pg_settings WHERE name IN ('fsync','synchronous_commit','full_page_writes') AND setting = 'off'")" = 3
+          # A skipped integration test on CI means the PostgreSQL service was not
+          # reachable (or BOILERPLATE_TEST_DB went missing), or psql was not installed.
+          # Treat that as a failure: a silent skip is what this pipeline exists to
+          # catch.
+          #
+          # One absolute path, named once, for the trx and for the gate that reads
+          # it: the gate once read a path the run never wrote, and passed every
+          # build without reading anything. The gate itself — a
+          # missing trx, nothing executed, or any skip fails — is
+          # check-test-results.sh, which ci-local.sh runs too.
+          - export INTEGRATION_TRX="$PWD/coverage/integration.trx"
+          - dotnet test tests/Boilerplate.IntegrationTests/Boilerplate.IntegrationTests.csproj
+            --configuration Release --no-build --logger "trx;LogFileName=$INTEGRATION_TRX"
+            --filter "Category!=Smoke&Category!=S3"
+            --collect:"XPlat Code Coverage" --results-directory ./coverage
+          - sh devtools/checks/check-test-results.sh integration "$INTEGRATION_TRX"
+          # Reporting only — no threshold fails the build yet. Nobody has measured
+          # the current baseline, and a blind gate on an existing codebase either
+          # fails on day one or gets set low enough to mean nothing. This makes the
+          # number visible on every build so a real floor can be picked later.
+          - dotnet tool install -g dotnet-reportgenerator-globaltool
+          - export PATH="$PATH:/root/.dotnet/tools"
+          - >
+            reportgenerator -reports:"coverage/**/coverage.cobertura.xml"
+            -targetdir:coveragereport -reporttypes:"Html;TextSummary"
+          - cat coveragereport/Summary.txt
+        artifacts:
+          - coveragereport/**
+
+    # Builds both targets of the Dockerfile and throws them away. The point is that
+    # a change breaking the image fails here rather than on the machine someone is
+    # trying to deploy to — the Dockerfile has its own restore, its own file list,
+    # and nothing in `dotnet build` exercises any of it.
+    - step: &build-image
+        name: Build the container image
+        runs-on:
+          - self.hosted
+          - linux
+          - boilerplate.ci
+        image: docker:28-cli
+        # Bitbucket's default is 120 minutes, and a stalled image pull or NuGet
+        # restore inside the build waits out all of it, holding the pipeline for
+        # two hours before failing with agent.step.time-limit-exceeded. A
+        # healthy build is minutes; 30 fails a stall early enough to re-run.
+        max-time: 30
+        # 2x, for the docker service's 4 GB (see definitions.services.docker).
+        size: 2x
+        services:
+          - docker
+        script:
+          # Pipelines refuses --privileged, and BuildKit's default buildx driver
+          # ("docker-container") boots a privileged helper to do the build — so
+          # `docker build` fails before reading the Dockerfile at all:
+          #   authorization denied by plugin pipelines: --privileged=true is not allowed
+          # The classic builder runs inside the daemon and needs no such helper.
+          # Nothing here depends on BuildKit: the `# syntax=` line is a comment to
+          # the classic builder, and there is no --mount, heredoc or COPY --link.
+          - export DOCKER_BUILDKIT=0
+          - docker build --target migrator --tag boilerplate-migrate:ci .
+          - docker build --tag boilerplate-api:ci .
+          - docker image inspect boilerplate-api:ci --format 'API image {{.Size}} bytes, user {{.Config.User}}'
+
+    # Manual on purpose. It needs a registry, which the deployment plan's §9 (task 7)
+    # leaves undecided — so this waits for a click instead of failing
+    # every build until it is. Set these as **secured** repository variables first:
+    #
+    #   DOCKER_REGISTRY   e.g. docker.io       (or ghcr.io, or an ACR/ECR host)
+    #   DOCKER_NAMESPACE  the account or org the image lives under
+    #   DOCKER_USERNAME
+    #   DOCKER_PASSWORD   an access token, never an account password
+    #
+    # Nothing about the image is registry-specific, which is the same reason no
+    # provider is named in the application: moving is a variable, not a rebuild.
+    - step: &push-image
+        name: Push the container image
+        runs-on:
+          - self.hosted
+          - linux
+          - boilerplate.ci
+        image: docker:28-cli
+        trigger: manual
+        # The same two builds as above, plus the pushes — the same stall, the
+        # same bound and the same memory.
+        max-time: 30
+        size: 2x
+        services:
+          - docker
+        script:
+          # Fail with the reason rather than with `docker login`'s "username is
+          # empty", which sends people hunting for a typo in a variable that was
+          # never meant to be set yet. There is no registry: the deployment plan's §9 item 1
+          # (task 7) leaves it to DevOps, undecided. Clicking this step before it is answered is the only way to
+          # get here.
+          - >
+            for v in DOCKER_REGISTRY DOCKER_NAMESPACE DOCKER_USERNAME DOCKER_PASSWORD; do
+              eval "value=\${$v:-}"
+              if [ -z "$value" ]; then
+                echo "REFUSING: \$$v is not set."
+                echo "This step needs a container registry, which this project has not set up yet."
+                echo "Nothing is broken."
+                echo "Once a registry exists, set all four as SECURED repository variables:"
+                echo "  DOCKER_REGISTRY DOCKER_NAMESPACE DOCKER_USERNAME DOCKER_PASSWORD"
+                echo "Until then the office server builds from source on the box and needs none of this."
+                exit 1
+              fi
+            done
+          - export IMAGE="$DOCKER_REGISTRY/$DOCKER_NAMESPACE/boilerplate-api"
+          - export MIGRATE_IMAGE="$DOCKER_REGISTRY/$DOCKER_NAMESPACE/boilerplate-migrate"
+          # The commit is the tag that never lies. The branch tag is a moving
+          # pointer for convenience; anything being diagnosed should be pinned to
+          # the commit.
+          - export TAG="$BITBUCKET_COMMIT"
+          # Same reason as the build step above: no privileged helper in Pipelines.
+          - export DOCKER_BUILDKIT=0
+          - echo "$DOCKER_PASSWORD" | docker login "$DOCKER_REGISTRY" -u "$DOCKER_USERNAME" --password-stdin
+          - docker build --target migrator --tag "$MIGRATE_IMAGE:$TAG" --tag "$MIGRATE_IMAGE:$BITBUCKET_BRANCH" .
+          - docker build --tag "$IMAGE:$TAG" --tag "$IMAGE:$BITBUCKET_BRANCH" .
+          - docker push --all-tags "$MIGRATE_IMAGE"
+          - docker push --all-tags "$IMAGE"
+          - docker logout "$DOCKER_REGISTRY"
+
+    # The Compose files are configuration, and configuration has already been wrong
+    # in a way nothing caught: an overlay whose `ports:` lacks `!override` APPENDS
+    # to the base file's list rather than replacing it, so QA published 8080 as
+    # well as 8081 and would have collided with DEV on the shared host. Both files
+    # read correctly — only the rendered result showed it.
+    #
+    # `config` parses and merges without starting anything, so this needs no daemon.
+    # It asserts the published set rather than the file contents, which is the only
+    # form of the question that has an unambiguous answer.
+    - step: &compose-check
+        name: Compose renders the intended ports and settings
+        runs-on:
+          - self.hosted
+          - linux
+          - boilerplate.ci
+        max-time: 10
+        image: docker:28-cli
+        script:
+          # The assertions — what each render publishes, against [deploy.compose] in factory.toml
+          # (the API, PostgreSQL's loopback binding, Caddy, the subnets) — and the QA placeholders every
+          # `${VAR:?…}` in compose.qa.yaml needs are in check-compose.py,
+          # which ci-local.sh runs too. It then runs check-required-settings.sh:
+          # the overlay supplies every setting appsettings.QA.json marks REPLACE.
+          # QA spent an afternoon in a restart loop on 2026-09-07 because
+          # Email:FrontendBaseUrl reached the appsettings file and never
+          # compose.qa.yaml; nothing else catches it, because the base file runs
+          # the API as Development, where that validator skips itself.
+          - apk add --no-cache python3 jq
+          - docker compose version
+          - python3 devtools/checks/check-compose.py
+
+    - step: &licence-check
+        name: Dependency licences
+        runs-on:
+          - self.hosted
+          - linux
+          - boilerplate.ci
+        max-time: 10
+        caches:
+          - nugetpackages
+        script:
+          - export DOTNET_NOLOGO=1
+          - dotnet restore Boilerplate.slnx
+          # Three dependencies of this stack relicensed commercially during
+          # scaffolding. A transitive one changing terms would otherwise go
+          # unnoticed, because nobody reads release notes for a package they did
+          # not choose. This lists them; review the diff when it changes.
+          - dotnet list Boilerplate.slnx package --include-transitive
+
+    # `dotnet list package --vulnerable` exits 0 whether or not it finds anything —
+    # the SDK does not fail the process on a hit — so this reads its JSON report:
+    # check-vulnerable-packages.py passes only when every project was audited, no
+    # source reported a problem and no package is vulnerable, the same
+    # read-the-results pattern the integration-skip check above uses.
+    - step: &vulnerability-check
+        name: Dependency vulnerabilities
+        runs-on:
+          - self.hosted
+          - linux
+          - boilerplate.ci
+        max-time: 10
+        caches:
+          - nugetpackages
+        script:
+          - export DOTNET_NOLOGO=1
+          - dotnet restore Boilerplate.slnx
+          - dotnet list Boilerplate.slnx package --vulnerable --include-transitive --format json > vulnerable.json
+          # The SDK image ships no Python; the check needs only the standard library.
+          - apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 > /dev/null
+          - python3 devtools/checks/check-vulnerable-packages.py vulnerable.json
+
+    # Runs the smoke half of the integration project against a DEPLOYED host —
+    # the same tests /deploy runs with `factory deploy smoke`, from our runner instead of
+    # a laptop. Pipelines does not do the deploy (the skill does, over SSH), so
+    # this is a CUSTOM pipeline: run it from Bitbucket after a deploy, against
+    # DEV or QA. It reaches the public hostname, as a laptop off the LAN would.
+    #
+    # Credentials are SECURED repository variables, one set per environment,
+    # never printed — the tests redact tokens from every message and the shell
+    # only tests presence:
+    #
+    #   SMOKE_DEV_ADMIN_EMAIL  SMOKE_DEV_ADMIN_PASSWORD   an Admin on DEV (required)
+    #   SMOKE_QA_ADMIN_EMAIL   SMOKE_QA_ADMIN_PASSWORD    the same pair for QA, which has no seeded admin
+    #
+    # What each account is and how it is set up: docs/dev-smoke-test-suite.md §4.
+    # Only one run may target a host at a time (§3 there) — do not start it
+    # while /deploy's own smoke step is running against the same environment.
+    - step: &smoke-deployed-host
+        name: Smoke the deployed host
+        runs-on:
+          - self.hosted
+          - linux
+          - boilerplate.ci
+        max-time: 20
+        caches:
+          - nugetpackages
+        script:
+          - export DOTNET_CLI_TELEMETRY_OPTOUT=1
+          - export DOTNET_NOLOGO=1
+          - >
+            case "$SMOKE_ENV" in
+              DEV) export BOILERPLATE_DEPLOYED_API_URL=https://api-dev.example.test ;;
+              QA)  export BOILERPLATE_DEPLOYED_API_URL=https://api-qa.example.test ;;
+              *)   echo "SMOKE_ENV must be DEV or QA, not '$SMOKE_ENV'."; exit 1 ;;
+            esac
+          # Presence only. The Admin pair is required — without it the run would
+          # prove only the anonymous checks and read as a smoke.
+          - >
+            for v in ADMIN_EMAIL ADMIN_PASSWORD; do
+              eval "value=\${SMOKE_${SMOKE_ENV}_$v:-}"
+              if [ -z "$value" ]; then
+                echo "REFUSING: SMOKE_${SMOKE_ENV}_$v is not set. Set it as a SECURED repository variable — see docs/dev-smoke-test-suite.md §4."
+                exit 1
+              fi
+            done
+          # The eval is safe: SMOKE_ENV is validated by the case above before any
+          # of this runs, and an expansion's result is not rescanned, so a secret
+          # containing $(...) or backticks cannot execute. The inner quotes are
+          # what stops a value with a space being word-split into the wrong
+          # variable — they are load-bearing, not decoration.
+          - >
+            eval "export BOILERPLATE_DEPLOYED_API_EMAIL=\"\${SMOKE_${SMOKE_ENV}_ADMIN_EMAIL}\"";
+            eval "export BOILERPLATE_DEPLOYED_API_PASSWORD=\"\${SMOKE_${SMOKE_ENV}_ADMIN_PASSWORD}\""
+          - echo "Smoking $SMOKE_ENV at $BOILERPLATE_DEPLOYED_API_URL"
+          - dotnet restore Boilerplate.slnx
+          - dotnet build tests/Boilerplate.IntegrationTests/Boilerplate.IntegrationTests.csproj --configuration Release --no-restore
+          # dotnet test exits non-zero on a failed test, which fails the step.
+          - dotnet test tests/Boilerplate.IntegrationTests/Boilerplate.IntegrationTests.csproj
+            --configuration Release --no-build --filter "Category=Smoke"
+            --logger "trx;LogFileName=smoke.trx"
+          # Five ways a run can pass while having proved nothing, and each one
+          # fails the step rather than being printed. The trx may not exist at
+          # all — a crashed test host writes none — so its absence is checked
+          # before anything greps it. The last is a skip no known reason explains:
+          # a hard-coded Skip, or a new reason nobody added here. Skips are
+          # counted from the results, never from Counters: VSTest leaves
+          # notExecuted at 0 for an xUnit skip.
+          - >
+            TRX=tests/Boilerplate.IntegrationTests/TestResults/smoke.trx;
+            if [ ! -f "$TRX" ]; then echo "REFUSING: no trx at $TRX — the test host did not finish."; exit 1; fi;
+            grep -o '<Counters[^>]*>' "$TRX" || true;
+            EXECUTED=$(grep -o '<Counters[^>]*executed="[0-9]*"' "$TRX" | grep -o 'executed="[0-9]*"' | grep -o '[0-9]*');
+            if [ -z "$EXECUTED" ]; then echo "REFUSING: no Counters line in the trx."; exit 1; fi;
+            if [ "$EXECUTED" -eq 0 ]; then echo "REFUSING: no smoke test executed."; exit 1; fi;
+            NOCREDS=$(grep -o '<Message>No account to log in as' "$TRX" | wc -l);
+            SKIPPED=$(grep -o '<UnitTestResult [^>]*outcome="NotExecuted"' "$TRX" | wc -l);
+            if [ "$NOCREDS" -gt 0 ]; then
+              echo "REFUSING: $NOCREDS test(s) skipped for want of an Admin account, so this run proved only the anonymous checks.";
+              echo "The variables are set but unusable — the shell checks for empty, the suite checks for blank. See docs/dev-smoke-test-suite.md §4.";
+              exit 1;
+            fi;
+            if [ "$SKIPPED" -ne "$NOCREDS" ]; then
+              echo "REFUSING: $SKIPPED test(s) skipped, but only $NOCREDS for a known reason — a check did not run and nothing names it.";
+              echo "Add a new reason to this gate (and to smoke_skip_reasons in factory.toml [deploy]) rather than widening this comparison.";
+              exit 1;
+            fi
+        artifacts:
+          - tests/Boilerplate.IntegrationTests/TestResults/smoke.trx
+
+    # The same credential check the pre-commit hook runs, so a clone that never
+    # ran `git config core.hooksPath .githooks` is still covered. `--tracked`
+    # scans every committed settings file rather than only what a commit stages.
+    # Offending values are never printed, by the script — so this step's log is
+    # safe even when it fails. Runs on the default SDK image, which carries git.
+    - step: &secret-scan
+        name: No secrets in settings files
+        runs-on:
+          - self.hosted
+          - linux
+          - boilerplate.ci
+        max-time: 10
+        script:
+          - sh ./devtools/checks/check-appsettings-secrets.sh --tracked
+
+    # Three files are generated and never hand-edited: docs/api/api-contracts.md
+    # and the Postman collection in devtools/api/postman/ from the endpoint
+    # source, in one run, and docs/database-erd.md from the EF model snapshot.
+    # This regenerates all of them in memory and fails when a committed file
+    # differs — an endpoint added, removed or reshaped, or a migration added,
+    # without regenerating. The generators are Python and the SDK image carries
+    # none, so this step runs on a Python image of its own rather than
+    # installing one each run.
+    - step: &generated-docs-check
+        name: Generated docs match the source; the book keeps its rules; nothing private is tracked
+        runs-on:
+          - self.hosted
+          - linux
+          - boilerplate.ci
+        max-time: 15
+        image: python:3.12-alpine
+        # The FE-guide and commit-message checks compare with the destination branch: a shallow clone
+        # can miss the merge base, and then they could not check.
+        clone:
+          depth: full
+        script:
+          - python3 devtools/checks/gen-api-contracts.py --check
+          - python3 devtools/checks/gen-database-erd.py --check
+          # Links resolve, every document has an owner, history stays in the archive. Needs git.
+          - apk add --no-cache git
+          - python3 devtools/checks/check-book.py
+          # Every skill loads: frontmatter, name, description length, a What next section.
+          - python3 devtools/checks/check-skills.py
+          # No credential and no path inside someone's home folder in any tracked file. A clone that
+          # never enabled the pre-commit hook is caught here (CLAUDE.md, Private settings).
+          - python3 devtools/checks/check-private-data.py --tracked
+          # Every tracked file against [[code_rules]]: allow-lists counted both ways, required patterns present.
+          - python3 devtools/checks/check-code-rules.py
+          # The dotnet pack's shape checks: list items, options validated on start, unique indexes.
+          - if [ -f devtools/checks/check-dotnet.py ]; then python3 devtools/checks/check-dotnet.py; fi
+          # An API change reaches the FE guide in the same branch. Needs the destination branch; a fetch
+          # that fails stops the step, and in a pull request "could not check" fails it.
+          - git fetch --quiet origin "+refs/heads/${BITBUCKET_PR_DESTINATION_BRANCH:-dev}:refs/remotes/origin/${BITBUCKET_PR_DESTINATION_BRANCH:-dev}"
+          - python3 devtools/checks/check-fe-guides.py
+          # dev holds the reviewed rules and the accepted lists the next checks read: a promotion's destination
+          # has neither until the promotion brings them, and a branch's own copy is never trusted.
+          - git fetch --quiet origin "+refs/heads/dev:refs/remotes/origin/dev"
+          # No requirements/ snapshot and no applied migration the destination holds is modified, deleted or
+          # renamed, however the branch changed it. Patterns: [guard] in factory.toml, from the
+          # destination, else dev. Fails closed.
+          - python3 devtools/checks/check-protected-paths.py --base "origin/${BITBUCKET_PR_DESTINATION_BRANCH:-dev}"
+          # The commit-msg hook's rules over every commit the branch brings, for a clone without the hook.
+          - python3 devtools/checks/check-commit-msg.py --commits "origin/${BITBUCKET_PR_DESTINATION_BRANCH:-dev}..HEAD"
+          # The same secret and home-folder patterns over every line each of the branch's commits added: --tracked
+          # sees only the final tree, and a secret added in one commit and removed in the next stays in the
+          # history. A branch that shares no merge base with the destination could not be checked, and fails.
+          # The accepted list is read from dev, never the branch's own copy: a PR cannot accept its own
+          # finding, and a promotion's destination does not hold the list until the promotion brings it.
+          - python3 devtools/checks/check-private-data.py --commits "origin/${BITBUCKET_PR_DESTINATION_BRANCH:-dev}..HEAD" --accepted-from origin/dev
+          - python3 devtools/checks/gen-task-rollup.py --check
+          # Every rule CLAUDE.md marks [enforced] still names a test or check that exists and runs here.
+          - python3 devtools/checks/check-rules.py --check
+          - python3 devtools/checks/check-test-setup.py
+          # Every step on our runner with a time limit, and no pipeline on every push.
+          - python3 devtools/checks/check-pipeline.py
+
+    - step: &guard-self-test
+        name: Factory self-tests
+        runs-on:
+          - self.hosted
+          - linux
+          - boilerplate.ci
+        max-time: 10
+        image: python:3.12-alpine
+        # On every push, with no changeset condition: a branch pipeline judges a changeset by the push's
+        # own commits, so a push that changed no files (a no-op merge) skipped this step and showed no
+        # result where a pass was expected. About two minutes, so it can never be skipped silently.
+        script:
+          # The guard's table of calls it must refuse, ask about or allow, then the
+          # AI tools' and the checks' tests, some through a throwaway repository
+          # (which needs git). unittest exits 5 when nothing ran, so an emptied
+          # suite fails too.
+          - apk add --no-cache git
+          - python3 -m unittest discover -s devtools/factory/hooks -p "test_*.py" -v
+          - python3 -m unittest discover -s devtools/factory -p "test_*.py" -v
+          - python3 -m unittest discover -s devtools/checks -p "test_*.py" -v
+
+    # Meant as a second layer, not the gate: this step runs from the pull request's own copy of this
+    # file, so a PR can edit or drop it, and a PR whose destination has no factory.py yet judges itself.
+    # The intended gate — the owners as default reviewers with a minimum number of approvals on the
+    # destination branch, in Bitbucket's repository settings, which no pull request can change — is
+    # not yet in place: it waits on a Bitbucket admin. Until then this step is the only check.
+    - step: &ai-files-owner
+        name: Files that steer the AI, changed only with their owner
+        runs-on:
+          - self.hosted
+          - linux
+          - boilerplate.ci
+        max-time: 10
+        image: python:3.12-alpine
+        script:
+          # A PR that changes CLAUDE.md, .claude/, the AI tools, the guard, the checks, the hooks or this
+          # file passes only when an owner ([ai_files] in devtools/factory/factory.toml) made it, or
+          # an owner approved it after its latest commit; the owner re-runs this step after approving. Reads the
+          # PR with the secured variable BITBUCKET_TOKEN (Pull requests: Read), never printed.
+          # The destination's copy of the tools judges, with the destination's [ai_files]: a PR that
+          # edited the check or made its author an owner would otherwise pass itself. Only the PR that
+          # brings the tools to a branch without them runs its own copy, and says so.
+          - apk add --no-cache git curl
+          - git fetch --quiet --unshallow || true
+          - git fetch --quiet origin "+refs/heads/${BITBUCKET_PR_DESTINATION_BRANCH:-dev}:refs/remotes/origin/${BITBUCKET_PR_DESTINATION_BRANCH:-dev}"
+          - |
+            DEST="origin/${BITBUCKET_PR_DESTINATION_BRANCH:-dev}"
+            if git cat-file -e "$DEST:devtools/factory/factory.py" 2>/dev/null; then
+              mkdir -p /tmp/destination && git archive "$DEST" devtools/factory | tar -x -C /tmp/destination
+              FACTORY_ROOT="$PWD" python3 /tmp/destination/devtools/factory/factory.py ai-files
+            else
+              echo "$DEST has no AI tools yet: this pull request's own copy judges it."
+              python3 devtools/factory/factory.py ai-files
+            fi
+
+    - step: &factory-governance
+        name: PR description, read back from Bitbucket
+        runs-on:
+          - self.hosted
+          - linux
+          - boilerplate.ci
+        max-time: 10
+        image: python:3.12-alpine
+        script:
+          # Read-only. Needs the secured repository variable BITBUCKET_TOKEN — an access
+          # token with Repositories and Pull requests: Read, never printed. The branch
+          # rules are not checked here: reading them needs Repositories: Admin, which can
+          # also change them, and a secured variable reaches every branch's pipelines. A
+          # person runs `factory protection --check` with their own credential.
+          - apk add --no-cache git curl
+          - '[ -n "$BITBUCKET_TOKEN" ] || { echo "Set the secured variable BITBUCKET_TOKEN first."; exit 1; }'
+          - 'PR_NUMBER=$(echo "$PR_NUMBER" | tr -d " "); [ -n "$PR_NUMBER" ] || { echo "Give PR_NUMBER: the pull request to check."; exit 1; }'
+          - python3 devtools/factory/factory.py pr-check "$PR_NUMBER"
+
+# No `default`: a push to a work branch runs nothing. Check a branch before its pull request
+# with devtools/checks/ci-local.sh; the pull request runs everything but the image build, which a merge
+# to dev runs.
+pipelines:
+  pull-requests:
+    '**':
+      - step: *secret-scan
+      - step: *ai-files-owner
+      - step: *generated-docs-check
+      - step: *guard-self-test
+      - step: *build-and-test
+      - step: *compose-check
+      - step: *licence-check
+      - step: *vulnerability-check
+  branches:
+    dev:
+      - step: *secret-scan
+      - step: *generated-docs-check
+      - step: *guard-self-test
+      - step: *build-and-test
+      - step: *compose-check
+      - step: *licence-check
+      - step: *vulnerability-check
+      - step: *build-image
+      - step: *push-image
+    qa:
+      - step: *build-and-test
+      - step: *compose-check
+      - step: *build-image
+      - step: *push-image
+    uat:
+      - step: *build-and-test
+      - step: *compose-check
+      - step: *build-image
+      - step: *push-image
+    main:
+      - step: *build-and-test
+      - step: *compose-check
+      - step: *build-image
+      - step: *push-image
+  # Run by hand from Bitbucket (Pipelines → Run pipeline → Custom) after a
+  # deploy. SMOKE_ENV picks the host and the credential set; the default is the
+  # environment in the pipeline's name.
+  custom:
+    smoke-dev:
+      - variables:
+          - name: SMOKE_ENV
+            default: DEV
+      - step: *smoke-deployed-host
+    smoke-qa:
+      - variables:
+          - name: SMOKE_ENV
+            default: QA
+      - step: *smoke-deployed-host
+    factory-governance:
+      - variables:
+          - name: PR_NUMBER
+            default: ""
+      - step: *factory-governance

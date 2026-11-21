@@ -1,0 +1,7 @@
+---
+description: Migration and dotnet-ef rules
+globs: src/Boilerplate.Persistence/**
+alwaysApply: false
+---
+
+Read and follow [`src/Boilerplate.Persistence/CLAUDE.md`](../../src/Boilerplate.Persistence/CLAUDE.md) before changing anything under `src/Boilerplate.Persistence/`. It holds the rules for this folder; the root `CLAUDE.md` still applies.
