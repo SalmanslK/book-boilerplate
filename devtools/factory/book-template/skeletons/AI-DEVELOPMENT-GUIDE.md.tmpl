@@ -19,6 +19,7 @@ plugin (`/book:<name>`); `.claude/skills/` holds only this project's (a pack's, 
 | `/book:check-docs` | docs ↔ code, neither presumed right | Reports before changing |
 | `/book:update-docs` | docs ← code you already trust | Applies changes |
 | `/book:fact-check` | FSD ↔ plan ↔ code ↔ tests | Writes only `docs/Audit/` |
+| `/book:check-permissions` | who may do what: FSD role rules ↔ authorization §2 ↔ code | Writes nothing |
 | `/book:trim` | docs ↔ their own size | Reports before changing |
 | `/book:setup` | the Book ↔ its template | Creates only what is absent; verify is read-only |
 | `/book:plan` | a new plan ← the FSD | Writes the draft; the person approves it |

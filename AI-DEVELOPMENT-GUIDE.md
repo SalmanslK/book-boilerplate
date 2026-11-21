@@ -29,6 +29,7 @@ Documentation skills differ by **what they compare**:
 | `/book:check-docs` | docs ↔ code, neither presumed right | Reports before changing; owns `references/comparison-checklist.md` |
 | `/book:update-docs` | docs ← code you already trust | Applies changes |
 | `/book:fact-check` | specification ↔ plan ↔ code ↔ tests | Evidence or `UNVERIFIED`; writes only `docs/Audit/` |
+| `/book:check-permissions` | who may do what: the FSD's role rules ↔ authorization §2 ↔ the code | Reports gaps; writes nothing |
 | `/book:trim` | docs ↔ their own size | Trims and archives; reports before changing |
 | `/book:plan` | a new plan ← the FSD | Writes the draft; the person approves it |
 | `/book:raise` (`defect` or `question`) | one ledger entry ← a finding | Writes the row; never posts an FSD comment unasked |

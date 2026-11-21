@@ -22,7 +22,7 @@ GAPS or NOT READY; no other project's names left; two agents.
 ## 9. Tasks
 
 All built and tagged `v1.0.0` (2026-11-18), merged locally with no pull request. Later releases
-(v1.1.0 to v1.3.1) are fixes and additions recorded in their commits and tags.
+(v1.1.0 to v1.3.2) are fixes and additions recorded in their commits and tags.
 
 | # | Task | FSD | Role | Status | Jira | PR | Merged |
 |---|---|---|---|---|---|---|---|
