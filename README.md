@@ -71,4 +71,9 @@ The rules are [CLAUDE.md](CLAUDE.md); the tooling is [devtools/README.md](devtoo
 
 ## Licence
 
-Add your own licence file before publishing.
+Licensed for use only: see [LICENSE](LICENSE). You may install and use it in the projects you
+work on; you may not redistribute it, or present it as your own, without the author's written
+permission. Copyright (c) 2026 Salman Khan.
+
+A project made from the boilerplate chooses its own licence for its own code; the Book's files
+inside it stay under the boilerplate's licence.
