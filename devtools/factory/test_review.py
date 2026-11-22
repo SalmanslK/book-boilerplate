@@ -1,6 +1,6 @@
 """
-Self-tests for the review path in factory.py: `factory fingerprint`, `factory reviewed --fingerprint`
-and `factory review-scope`, and the split review checklist they serve. CI and ci-local.sh run them with
+Self-tests for the review path in factory.py: `book fingerprint`, `book reviewed --fingerprint`
+and `book review-scope`, and the split review checklist they serve. CI and ci-local.sh run them with
 the other factory tests:
 
     python3 devtools/checks/run-self-tests.py devtools/factory

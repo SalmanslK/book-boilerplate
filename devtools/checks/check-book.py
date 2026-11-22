@@ -32,7 +32,7 @@ these six things.
 
 Not checked, on purpose: docs/archive/ (written once, never maintained), requirements/ (the
 client's documents) and devtools/factory/book-template/ (the template's files, live only once
-`factory book init` copies them into a Book) — except that rules 4 and 5 read the two archived ledgers.
+`book init` copies them into a Book) — except that rules 4 and 5 read the two archived ledgers.
 
 Usage (from the repository root):
     python3 devtools/checks/check-book.py      # exit 1 when a rule is broken

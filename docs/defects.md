@@ -71,3 +71,4 @@ One line per fixed defect: id, what it was, and the commit or release that fixed
 - **D38** — `/check-guides` asked a guide to name any dotted string assigned to a name, such as an application's name, as an error code. Fixed in v1.3.4.
 - **D39** — the book plugin was not pinned to a release, so each plugin release reached projects unreviewed, and no check tied the plugin's version to the template's. Fixed in v1.3.4.
 - **D40** — the copied `ShippedTextTests` failed a project on its own defect ids in template-owned files it keeps changed. Fixed in v1.4.1.
+- **D41** — the guard refused `book deploy revert --to <sha>`, reading `--to` as an abbreviated `--target`. Fixed in v1.5.0.

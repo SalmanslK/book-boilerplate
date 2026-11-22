@@ -1,12 +1,12 @@
 """
-factory book verify|init — whether this repository's Book is set up, and setting one up.
+book verify|init|upgrade — whether this repository's Book is set up, setting one up, and upgrading it.
 
 The Book is the documentation, requirements and AI-rules architecture every session works inside:
 the instruction files, the owner documents, `requirements/`, the hooks, the guard and the checks.
 
-    factory book verify [--target <repo>] [--no-self-tests]
-    factory book init --params <book.toml> [--target <repo>]
-    factory book upgrade --target <repo> [--apply]
+    book verify [--target <repo>] [--no-self-tests]
+    book init --params <book.toml> [--target <repo>]
+    book upgrade --target <repo> [--apply]
 
 **verify** is read-only. It runs the checks nothing else makes (N1-N20 of the Book manifest), one line
 per element - `OK`, `MISSING`, `WRONG <why>`, `TO FILL <slot>`, `COULD NOT CHECK <why>` - then calls
@@ -144,7 +144,7 @@ class Context:
 
 def load_manifest(template_dir: Path = TEMPLATE_DIR) -> dict:
     if tomllib is None:
-        raise BookError("factory book needs Python 3.11 or later (tomllib).")
+        raise BookError("book needs Python 3.11 or later (tomllib).")
     path = template_dir / "manifest.toml"
     if not path.is_file():
         return {}
@@ -683,7 +683,7 @@ def n15_factory_config(ctx: Context) -> list[Line]:
     owners = [o for o in ai.get("owners", []) if isinstance(o, dict) and o.get("account_id")
               and not FILL.search(str(o.get("account_id")))]
     if not owners:
-        fill.append("[ai_files] owners (each owner runs `factory pr whoami`)")
+        fill.append("[ai_files] owners (each owner runs `book pr whoami`)")
     notes = (ctx.config.get("deploy") or {}).get("notes") or {}
     if notes:
         import deploy as deploy_tool  # its steps, not a copy of the list
@@ -719,11 +719,10 @@ def frontmatter(text: str) -> dict[str, str] | None:
 
 def n16_skills(ctx: Context) -> list[Line]:
     name = "skills have valid frontmatter"
+    # The Book's skills are the plugin's: `.claude/skills/` holds only the project's own, and may be absent.
     folder = ctx.root / ".claude" / "skills"
-    if not folder.is_dir():
-        return [Line(MISSING, name, ".claude/skills/")]
     problems = []
-    present = sorted(p.name for p in folder.iterdir() if p.is_dir())
+    present = sorted(p.name for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
     for skill in present:
         text = ctx.text(f".claude/skills/{skill}/SKILL.md")
         if text is None:
@@ -738,7 +737,8 @@ def n16_skills(ctx: Context) -> list[Line]:
             problems.append(f"{skill}: no description")
         elif len(fields["description"]) > 1024:
             problems.append(f"{skill}: description over 1,024 characters")
-    lines = [Line(WRONG, name, sample(problems, 2)) if problems else Line(OK, name, f"{len(present)} skills")]
+    lines = [Line(WRONG, name, sample(problems, 2)) if problems else
+             Line(OK, name, f"{len(present)} skills" if present else "none of the project's own")]
     expected = [s for s in ctx.manifest.get("skills", []) if s not in present]
     if expected:
         lines.append(Line(MISSING, "the template's skills are present", sample(expected, 4)))
@@ -821,7 +821,7 @@ def n17_drive_folder(ctx: Context) -> list[Line]:
     skill = ctx.text(".claude/skills/publish-guides/SKILL.md")
     script = ctx.text(".claude/skills/publish-guides/Publish-FeGuidesToDrive.ps1")
     if skill is not None and is_rename_stub(skill.encode("utf-8")):
-        skill = None  # the v1.4.0 stub only points at /book:publish-guides
+        skill = None  # a stub kept from v1.4.x only points at /book:publish-guides
     if "fe-guides" not in installed_packs(ctx.config) and skill is None and script is None:
         return [Line(NA, name, "no fe-guides pack")]
     folder_id = str((ctx.config.get("fe_guides") or {}).get("drive_folder_id") or "")
@@ -852,7 +852,7 @@ def n18_private_settings(ctx: Context) -> list[Line]:
         return [Line(WRONG, name, "factory.toml holds live_credential - a person's credential belongs in "
                      "their private settings file, never the repository")]
     if ctx.private is None:
-        return [Line(COULD_NOT, name, "only that repository's own `factory book verify` reads its private settings")]
+        return [Line(COULD_NOT, name, "only that repository's own `book verify` reads its private settings")]
     if ctx.private.get("file") == "invalid":
         return [Line(WRONG, name, "the private settings file is not valid TOML")]
     if ctx.private.get("file") != "present" and fsd_delivered_as_file(ctx):
@@ -1041,7 +1041,7 @@ def verify(ctx: Context) -> tuple[str, bool]:
     version = (ctx.manifest.get("version") or "none")
     target_version = (load_manifest(ctx.root / "devtools/factory/book-template").get("version")
                       if (ctx.root / "devtools/factory/book-template/manifest.toml").is_file() else None)
-    head = f"factory book verify - template {target_version or 'not stamped'}"
+    head = f"book verify - template {target_version or 'not stamped'}"
     if target_version and target_version != version:
         head += f" (this kit is {version})"
     text, ok = verdict(lines)
@@ -1064,7 +1064,7 @@ REVIEW_SCOPE = "review-scope.toml"  # a stack pack's own [review_scope]; the ske
 
 def load_params(path: Path) -> dict:
     if tomllib is None:
-        raise BookError("factory book needs Python 3.11 or later (tomllib).")
+        raise BookError("book needs Python 3.11 or later (tomllib).")
     if not path.is_file():
         raise BookError(f"No parameter file at {path}. The book:setup skill writes it from the person's answers; "
                         "init never guesses one.")
@@ -1081,7 +1081,7 @@ def load_params(path: Path) -> dict:
             isinstance(o, dict) and set(o) == {"name", "account_id"} and all(isinstance(v, str) for v in o.values())
             for o in owners):
         raise BookError('owners is a list of tables, one per owner: owners = [{ name = "A Person", account_id = '
-                        '"the Git host account id" }] (`factory pr whoami` prints the id), or [] for none yet.')
+                        '"the Git host account id" }] (`book pr whoami` prints the id), or [] for none yet.')
     unknown = [p for p in params["packs"] if p not in ("deploy", "bitbucket", "fe-guides")]
     if unknown:
         raise BookError(f"packs {unknown} are not in this template (deploy, bitbucket, fe-guides).")
@@ -1316,7 +1316,7 @@ def init(target: Path, params: dict, manifest: dict, template_root: Path, run: R
                           "" if code == 0 else (out.splitlines() or [""])[-1][:160]))
     made = sum(l.status == CREATED for l in lines)
     kept = sum(l.status == KEPT for l in lines)
-    head = f"factory book init - template {manifest.get('version', 'none')} - {made} created, {kept} kept"
+    head = f"book init - template {manifest.get('version', 'none')} - {made} created, {kept} kept"
     return "\n".join([head, *(f"{l.status:<8} {l.element}" + (f" - {l.detail}" if l.detail else "") for l in lines)]), True
 
 
@@ -1447,7 +1447,7 @@ def stamp_version(path: Path, version: str) -> None:
         lines = text.split(newline)
         at = next((i for i, l in enumerate(lines) if l.strip() and not l.lstrip().startswith("#")), len(lines))
         lines[at:at] = ["# The Book template version this repository's template-owned files came from "
-                        "(`factory book upgrade`).", line]
+                        "(`book upgrade`).", line]
         text = newline.join(lines)
     path.write_bytes(text.encode("utf-8"))
 
@@ -1459,12 +1459,12 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
     with the installed version and the new one; only files the project has not changed are written.
     """
     if target.resolve() == template_root.resolve():
-        raise BookError("The template cannot upgrade itself: run `factory book upgrade --target <project>` from the "
+        raise BookError("The template cannot upgrade itself: run `book upgrade --target <project>` from the "
                         "newer boilerplate's checkout.")
     if not (target / ".git").exists():
         raise BookError(f"{target} is not a git repository.")
     if not (target / CONFIG_RELATIVE).is_file():
-        raise BookError(f"{target} has no {CONFIG_RELATIVE}: it holds no Book to upgrade (`factory book init` "
+        raise BookError(f"{target} has no {CONFIG_RELATIVE}: it holds no Book to upgrade (`book init` "
                         "installs one).")
     new_version = str(manifest.get("version") or "")
     if not version_key(new_version):
@@ -1525,6 +1525,8 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
                          "carry over by hand:\n" +
                          diff(rel, old_files[rel], new_files[rel], f"template {installed}", f"template {new_version}"))
     notes += must_merge_notes(rows)
+    notes += old_command_notes(target, rows)
+    notes += long_lived_notes(target, config, run)
     notes += plugin_notes(target, config, manifest, rows)
     notes += fe_guides_notes(target, config)
     notes += deploy_notes(config)
@@ -1534,7 +1536,7 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
     counts = {s: sum(r[0] == s for r in rows)
               for s in (CURRENT, BEHIND, NEW, CHANGED, CONFLICT, REMOVED, DROPPED, UNKNOWN, DECLINED)}
     mode = "--apply" if apply else "report only, nothing written (--apply updates the BEHIND and NEW files)"
-    head = (f"factory book upgrade - installed {installed or 'unknown'}, template {new_version} - {mode}\n"
+    head = (f"book upgrade - installed {installed or 'unknown'}, template {new_version} - {mode}\n"
             + " · ".join(f"{n} {s.lower()}" for s, n in counts.items() if n))
     out = [head, *notes, ""] + [f"{status:<9} {rel}" for status, rel in rows]
     written: list[str] = []
@@ -1579,6 +1581,20 @@ def is_rename_stub(content: bytes) -> bool:
     lines = head.group(1).splitlines() if head else []
     return (any(line.startswith(b"description: Renamed to ") for line in lines)
             and any(line.strip() == b"disable-model-invocation: true" for line in lines))
+
+
+STUB_TARGET = re.compile(rb"^description: Renamed to (/book:[\w-]+)", re.M)
+
+
+def stub_target(path: Path) -> str:
+    """The new name a rename stub points at (`/book:outline-api`), or "" when the file is no stub."""
+    try:
+        content = path.read_bytes()
+    except OSError:
+        return ""
+    found = STUB_TARGET.search(FRONTMATTER.match(content).group(1)) if is_rename_stub(content) else None
+    return found.group(1).decode() if found else ""
+
 
 PLUGIN_OWNED = (".claude/skills/", ".claude/agents/")
 
@@ -1653,7 +1669,8 @@ def plugin_notes(target: Path, config: dict, manifest: dict, rows: list[tuple[st
     """
     What a Book moving onto the book plugin (v1.3.0) must do by hand, since upgrade never writes a file the
     project owns or changed: enable the plugin, point [review_scope] at the plugin's checklist, and delete the
-    old skill and agent files the plugin now provides (kept, DROPPED or CONFLICT, so nothing is lost unasked).
+    old skill and agent files the plugin now provides (kept, DROPPED or CONFLICT, so nothing is lost unasked),
+    and - from v1.5 - the old names' rename stubs, which stop working once the upgrade lands.
     """
     plugin = manifest.get("plugin")
     if not plugin:
@@ -1685,9 +1702,14 @@ def plugin_notes(target: Path, config: dict, manifest: dict, rows: list[tuple[st
                      "`always` and `[review_scope.dimensions]` with the template's (the stack pack's "
                      "review-scope.toml, or skeletons/review-scope.toml) - the method, Pass A and B0 are the "
                      "plugin's `book:peer-review/references/` files now")
+    # A rename stub kept from v1.3.0 or v1.4.0 (DROPPED: v1.5 retires the old names) is its own note: it holds
+    # nothing to carry over. So is the copy of a pack's stub in the project's own book-template/.
+    stubs = sorted((rel, stub_target(target / rel)) for status, rel in rows
+                   if status == DROPPED and "/.claude/skills/" in f"/{rel}" and stub_target(target / rel))
+    stubbed = {rel for rel, _ in stubs}
     retired = sorted(rel for status, rel in rows
-                     if rel.startswith(PLUGIN_OWNED) and (status == DROPPED or
-                                                          (status == CONFLICT and rel.endswith("/SKILL.md"))))
+                     if rel.startswith(PLUGIN_OWNED) and rel not in stubbed and (
+                         status == DROPPED or (status == CONFLICT and rel.endswith("/SKILL.md"))))
     # A dropped test that loads one of those scripts fails CI the moment the script goes: it goes with them.
     scripts = {Path(rel).name for rel in retired if rel.endswith(".py")}
     tests = []
@@ -1707,8 +1729,23 @@ def plugin_notes(target: Path, config: dict, manifest: dict, rows: list[tuple[st
                      "kept (DROPPED or CONFLICT below, under .claude/skills/ and .claude/agents/; the plugin "
                      "provides each now - v1.3.0 moved the Book's skills and agents, v1.4.0 the packs' skills): "
                      "once the plugin is enabled, carry any local edit over (a pack skill's project facts go in "
-                     "factory.toml: [fe_guides], [deploy]) and delete them; a CONFLICT SKILL.md takes the "
-                     "template's stub")
+                     "factory.toml: [fe_guides], [deploy]) and delete them")
+    if stubs:
+        names = ", ".join(sorted({f"/{Path(rel).parent.name} -> {new}" for rel, new in stubs}))
+        copies = sum(not rel.startswith(".claude/skills/") for rel, _ in stubs)
+        where = ".claude/skills/" + (f" (and {copies} in devtools/factory/book-template/packs/)" if copies else "")
+        note = (f"{WRONG} {len(stubs)} old-name stub(s) are DROPPED below ({names}): template "
+                f"{manifest.get('version')} retires the old names, so they stop working after this upgrade - use "
+                f"the /book: name each points at, and delete the stubs' folders under {where} in the same pull "
+                "request")
+        try:
+            agents = (target / "AGENTS.md").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            agents = ""
+        if "](.claude/skills/)" in agents:
+            note += ("; AGENTS.md links to .claude/skills/, which goes once no skill of the project's own is left "
+                     "there: take the template's wording, which names the folder without linking it")
+        notes.append(note)
     return notes
 
 
@@ -1717,7 +1754,7 @@ def plugin_notes(target: Path, config: dict, manifest: dict, rows: list[tuple[st
 BOOK_ENTRY = "devtools/book.py"
 BOOK_NEEDS = ("devtools/factory/factory.py", "devtools/factory/hooks/guard.py")
 # What each kept file means until it is merged, one clause per file.
-MERGE_UNTIL = {"devtools/factory/factory.py": "`book` runs as the old `factory`",
+MERGE_UNTIL = {"devtools/factory/factory.py": "`book` refuses to run",
                "devtools/factory/hooks/guard.py": "the guard judges a deploy only under the name factory.py"}
 
 
@@ -1730,6 +1767,73 @@ def must_merge_notes(rows: list[tuple[str, str]]) -> list[str]:
     until = " and ".join(MERGE_UNTIL[rel] for rel in kept)
     return [f"{WRONG} {BOOK_ENTRY} is NEW, but the project keeps its own {' and '.join(kept)} (CONFLICT below): merge "
             f"{'these' if len(kept) > 1 else 'it'} before using book - until then {until}"]
+
+
+# From v1.5 factory.py is no command: a CI file, script or hook the project keeps (changed by it, so upgrade never
+# rewrites it) that still runs it fails once the upgrade lands, as each `book` command it meant to run.
+# A path to factory.py at the start of a word (after a Python of any version, `uv run`, `$PY`, a quote, or run
+# directly as `./devtools/factory/factory.py`), then a command - never a redirect (`2>/dev/null`), and never a
+# `ref:path` git reads (`git cat-file -e "$DEST:devtools/factory/factory.py"`), which runs nothing, and never the
+# destination's copy the pipelines' AI-files step extracts to /tmp/destination/ and runs on a branch older than
+# v1.4.0, where factory.py is still a command.
+OLD_COMMAND = re.compile(r"""(?:^|[\s;&|(`"'=])(?!/tmp/destination/)[^\s"':;&|(`=]*factory[/\\]factory\.py["']?[ \t]+(?!\d*[<>])[\w$-]""",
+                         re.M)
+RUNS_COMMANDS = (".yml", ".yaml", ".sh", ".ps1")
+
+
+def old_command_notes(target: Path, rows: list[tuple[str, str]]) -> list[str]:
+    """Kept CI files, scripts and hooks that still run `python .../factory/factory.py <command>`: merge them first."""
+    callers = []
+    for status, rel in rows:
+        if status not in (CHANGED, CONFLICT, UNKNOWN) or rel.startswith("devtools/factory/book-template/") or not (
+                rel.endswith(RUNS_COMMANDS) or rel.startswith(".githooks/")):
+            continue
+        try:
+            text = (target / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if OLD_COMMAND.search(text):
+            callers.append(f"{rel} ({status})")
+    if not callers:
+        return []
+    return [f"{WRONG} {', '.join(callers)} still run(s) devtools/factory/factory.py as a command, which from v1.5 "
+            "refuses to run: carry the template's switch to devtools/book.py over in the same pull request, or "
+            "each step that runs it fails"]
+
+
+# From v1.5 the pipelines' AI-files step runs the destination branch's own devtools/book.py, or, on a branch whose
+# Book is older than v1.4.0 (factory.py, no book.py), that branch's own factory.py, still a command there.
+PRE_BOOK_ENTRY = "devtools/factory/factory.py"
+
+
+def long_lived_notes(target: Path, config: dict, run: Runner) -> list[str]:
+    """
+    The protected branches (`protected_branches` in factory.toml) still holding a Book from before v1.4.0, read
+    from the project's own refs (origin/<branch>, else <branch>). Information, not a stop: a pull request into one
+    is judged by that branch's own factory.py until a promotion brings it 1.5, and promoting early to avoid that
+    would release unfinished work.
+    """
+    if "bitbucket" not in installed_packs(config):
+        return []
+    older, unread = [], []
+    for branch in [str(b) for b in config.get("protected_branches") or [] if str(b)]:
+        ref = next((r for r in (f"origin/{branch}", branch)
+                    if run(["git", "rev-parse", "--verify", "--quiet", f"{r}^{{commit}}"], target, 60)[0] == 0), None)
+        if ref is None:
+            unread.append(branch)
+        elif (run(["git", "cat-file", "-e", f"{ref}:{BOOK_ENTRY}"], target, 60)[0] != 0
+              and run(["git", "cat-file", "-e", f"{ref}:{PRE_BOOK_ENTRY}"], target, 60)[0] == 0):
+            older.append(ref)
+    notes = []
+    if older:
+        notes.append(f"{', '.join(older)} hold(s) a Book from before v1.4.0 (factory.py, no devtools/book.py), for "
+                     "information: the pipelines' AI-files step judges a pull request into them with their own old "
+                     "check until a promotion brings them 1.5 - nothing to promote before this upgrade")
+    if unread:
+        books = "their Books were" if len(unread) > 1 else "its Book was"
+        notes.append(f"no local or origin ref for {', '.join(unread)}, so {books} not read, for information: a "
+                     "long-lived branch older than v1.4.0 keeps its own old check until a promotion brings it 1.5")
+    return notes
 
 
 # What /book:deploy reads from [deploy]: what deploy.py needs before it runs (`target()`), and the keys v1.4.0

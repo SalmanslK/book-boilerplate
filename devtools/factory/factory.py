@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
 """
-factory — the AI tools a session and a person use, each holding its own credential.
+factory.py — the module behind `book` (python devtools/book.py <command>): the AI tools a session and a person
+use, each holding its own credential. It is not a command of its own from Book v1.5.
 
-    factory pr show|comments|open|describe|comment|post|resolve|whoami   a Bitbucket pull request; the token stays in this process
-    factory fingerprint                            the hash of what a review covers (one owner: book:self-review, commit)
-    factory reviewed READY|NOT-READY [--fingerprint <hash>]   record /book:self-review's verdict for this commit
-    factory review-scope [paths...] [--range A...B] which review checklist files a change needs read
-    factory jira <key>                             read one Jira Task or Bug, read only
-    factory ai-files [<pr>]                        CI: a change to the files that steer the AI is made or approved by an owner
-    factory protection [--check]                   read the branch restrictions back from Bitbucket
-    factory pr-check [<pr>]                        a PR description has what CLAUDE.md asks for
-    factory fsd-threads [--save]                   the live FSD against the last check
-    factory fsd-page <heading> [--print]           which pages of the highest FSD revision hold a section
-    factory requirements status                    offline: every requirements source, its snapshot, the weekly rule
-    factory sync-plan [--mode delta|full|verify-only]   read-only: /book:sync-sources's baseline, mode, delta set
-    factory impact [paths...]                      what the change reaches: modules, tests, guides, requirement ids
-    factory deploy check|gate|changes|up|smoke|revert|report   /book:deploy's steps, DEV and QA only
-    factory deploy status [--target dev|qa|all]   read-only: the commit each environment runs
-    factory book verify [--target <repo>]                  whether the Book is set up (read-only): READY or not
-    factory book upgrade --target <repo> [--apply]         drift against a newer template; --apply updates unchanged files
-    factory settings --check                       each private setting the tooling reads: set or not set, names only
-    factory config <table.key>                     one value from factory.toml (never the private settings)
+    book pr show|comments|open|describe|comment|post|resolve|whoami   a Bitbucket pull request; the token stays in this process
+    book fingerprint                            the hash of what a review covers (one owner: book:self-review, commit)
+    book reviewed READY|NOT-READY [--fingerprint <hash>]   record /book:self-review's verdict for this commit
+    book review-scope [paths...] [--range A...B] which review checklist files a change needs read
+    book jira <key>                             read one Jira Task or Bug, read only
+    book ai-files [<pr>]                        CI: a change to the files that steer the AI is made or approved by an owner
+    book protection [--check]                   read the branch restrictions back from Bitbucket
+    book pr-check [<pr>]                        a PR description has what CLAUDE.md asks for
+    book fsd-threads [--save]                   the live FSD against the last check
+    book fsd-page <heading> [--print]           which pages of the highest FSD revision hold a section
+    book requirements status                    offline: every requirements source, its snapshot, the weekly rule
+    book sync-plan [--mode delta|full|verify-only]   read-only: /book:sync-sources's baseline, mode, delta set
+    book impact [paths...]                      what the change reaches: modules, tests, guides, requirement ids
+    book deploy check|gate|changes|up|smoke|revert|report   /book:deploy's steps, DEV and QA only
+    book deploy status [--target dev|qa|all]   read-only: the commit each environment runs
+    book verify [--target <repo>]               whether the Book is set up (read-only): READY or not
+    book upgrade --target <repo> [--apply]      drift against a newer template; --apply updates unchanged files
+    book settings --check                       each private setting the tooling reads: set or not set, names only
+    book config <table.key>                     one value from factory.toml (never the private settings)
 
 A session reaches a service through a tool that holds the credential, never with it (CLAUDE.md,
 Private settings).
@@ -115,7 +116,7 @@ PRIVATE_FOREIGN_NAMES = "private_foreign_names"
 
 def load_config(root: Path) -> Config:
     if tomllib is None:
-        raise FactoryError("factory needs Python 3.11 or later (tomllib).")
+        raise FactoryError("book needs Python 3.11 or later (tomllib).")
     with open(root / CONFIG_RELATIVE, "rb") as handle:
         raw = tomllib.load(handle)
     private = private_settings_path(raw)
@@ -211,7 +212,7 @@ def merge_resolutions(root: Path, base: str) -> list[str]:
     `git diff --numstat` lines for what the branch's merges added beyond an automatic merge.
     `--no-merges` leaves a merge commit out, so a change written into one — a conflict
     resolved by hand, or a file slipped into a `--no-commit` merge — was invisible to
-    `factory impact`. Each merge is redone
+    `book impact`. Each merge is redone
     by git and only the difference is the branch's own.
     """
     excluded = own_commits(root, base)[3:]  # the merge base, and the base branch when it is known
@@ -286,7 +287,7 @@ def render_threads(threads: list[dict], modified: str, today: str) -> str:
     """The comment threads as a snapshot: what was asked, on which text, and what the BA answered."""
     ordered = sorted(threads, key=lambda t: t.get("createdTime", ""))
     lines = [f"# FSD comment threads — {today}", "",
-             f"> Saved by `factory fsd-threads --save` from the live FSD Doc (modifiedTime {modified}): "
+             f"> Saved by `book fsd-threads --save` from the live FSD Doc (modifiedTime {modified}): "
              f"{len(threads)} threads, {sum(not t.get('resolved') for t in threads)} open. The client's material, "
              "read-only like the PDFs beside it; the next save is a new file. Where an answer here and the "
              "FSD text disagree, the FSD wins and the difference is a question.", ""]
@@ -751,7 +752,7 @@ def render_impact(report: dict) -> str:
         lines += [f"- {item}" for item in report["regenerate"]]
     if not lines:
         lines.append("Nothing changed against the base yet — name the paths you expect to touch: "
-                     "`factory impact <paths…>`.")
+                     "`book impact <paths…>`.")
     return "\n".join(lines)
 
 
@@ -924,11 +925,11 @@ def command_fingerprint(root: Path, config: Config, args: argparse.Namespace) ->
 
 def command_reviewed(root: Path, config: Config, args: argparse.Namespace) -> str:
     """
-    Records /book:self-review's verdict for the current commit, so `factory pr open` can require a READY
+    Records /book:self-review's verdict for the current commit, so `book pr open` can require a READY
     one (CLAUDE.md, Git: run /book:self-review before opening a PR). A review covers uncommitted work too,
     so a verdict is recorded only for a clean tree — otherwise it would vouch for a commit it never saw.
 
-    With --fingerprint, the hash `factory fingerprint` printed when the review began: the verdict is
+    With --fingerprint, the hash `book fingerprint` printed when the review began: the verdict is
     recorded only when this commit holds exactly that content against the same base. That is how
     /book:commit records the verdict of a review it ran over uncommitted work, once it has committed all of
     it, so `pr open` needs no second review; an edit after the review, an untracked file added or left
@@ -945,7 +946,7 @@ def command_reviewed(root: Path, config: Config, args: argparse.Namespace) -> st
     if args.fingerprint is not None:
         given = args.fingerprint.strip().lower()
         if not FINGERPRINT.fullmatch(given):
-            raise FactoryError("--fingerprint takes the hash `factory fingerprint` printed when the review began.")
+            raise FactoryError("--fingerprint takes the hash `book fingerprint` printed when the review began.")
         now = content_fingerprint(root, config)
         if now != given:
             raise FactoryError(f"This commit is not what was reviewed: its fingerprint is {now[:12]}, the review's was "
@@ -1410,7 +1411,7 @@ def ai_files_line(root: Path, config: Config, destination: str) -> str:
 def ai_files_warning(root: Path, config: Config, destination: str, account_id: str) -> str:
     """
     `pr open`'s note when the person opening is not an AI-files owner and the PR changes files that
-    steer the AI. `factory ai-files` is the check, in CI; while CI is suspended nothing runs it before
+    steer the AI. `book ai-files` is the check, in CI; while CI is suspended nothing runs it before
     the merge, so the person opening is told here. It warns and never refuses, and the description is
     left as written. The person is the Bitbucket account the open uses — the id `[ai_files] owners`
     names, from the destination branch — compared here and never printed.
@@ -1449,7 +1450,7 @@ def ai_files_staged(root: Path, config: Config) -> tuple[str, bool]:
     AI only when it sees the write — an edit, or a shell write it recognises. A script (`python edit.py`)
     or `git apply` changes them where no hook can look, so the commit is where every such change is
     named, whoever or whatever wrote it. It warns and never refuses: a person who is not an owner may
-    still change these, with an owner's approval on the pull request, which `factory ai-files` checks.
+    still change these, with an owner's approval on the pull request, which `book ai-files` checks.
     Whether the committer is an owner is a hint from git's user.name against the owners' names — a name
     anyone can set, so it decides nothing; it is compared here and never printed.
     """
@@ -1470,7 +1471,7 @@ def ai_files_staged(root: Path, config: Config) -> tuple[str, bool]:
                      "them only when it sees the write; a script or `git apply` changes them unseen, so this "
                      "is where such a change is named. Check the diff is one you meant.")
     lines.append(f"  Your git name is {who} in [ai_files]. The pull request passes only when an owner makes it, "
-                 "or approves it after its latest commit (`factory ai-files`, CLAUDE.md Git); while CI is "
+                 "or approves it after its latest commit (`book ai-files`, CLAUDE.md Git); while CI is "
                  "suspended, the person merging holds that.")
     return "\n".join(lines), True
 
@@ -1677,10 +1678,10 @@ def command_deploy(root: Path, config: Config, args: argparse.Namespace) -> tupl
 
 def private_presence(raw: dict) -> dict:
     """
-    For `factory book verify`: whether the private settings file exists and each PRIVATE_KEYS key is set,
+    For `book verify`: whether the private settings file exists and each PRIVATE_KEYS key is set,
     and whether the deploy variables ([deploy] test_db_variable, smoke_url_variable, smoke_credentials and
     each smoke_pairs account) are set — names and yes/no only, never a value. The file was already read in
-    this process by load_config, as every factory command reads it; nothing here reads it again.
+    this process by load_config, as every book command reads it; nothing here reads it again.
     """
     keys = {f"[{section}.{table}] {key}": bool(((raw.get(section) or {}).get(table) or {}).get(key))
             for (section, table), names in PRIVATE_KEYS.items() for key in names}
@@ -1713,14 +1714,14 @@ def settings_location(raw: dict) -> str:
 
 def command_settings(root: Path, config: Config | None, args: argparse.Namespace) -> tuple[str, bool]:
     """
-    `factory settings --check`: each private setting the tooling reads — PRIVATE_KEYS from the private
+    `book settings --check`: each private setting the tooling reads — PRIVATE_KEYS from the private
     settings file, and the deploy smoke variables from the environment — by name, `set` or `not set`.
     The file is read in this process only to test which keys it holds (load_config, as every command
     reads it); no value, part of a value or length leaves this function, and the file is never quoted.
     Exit 1 only when the file is not valid TOML.
     """
     if tomllib is None:
-        raise FactoryError("factory needs Python 3.11 or later (tomllib).")
+        raise FactoryError("book needs Python 3.11 or later (tomllib).")
     with open(root / CONFIG_RELATIVE, "rb") as handle:
         committed = tomllib.load(handle)  # the repository's own file: `private_settings` comes from here
     try:
@@ -1750,7 +1751,7 @@ def command_config(root: Path, config: Config | None, args: argparse.Namespace) 
     A string, number or boolean only; a table or a list is refused.
     """
     if tomllib is None:
-        raise FactoryError("factory needs Python 3.11 or later (tomllib).")
+        raise FactoryError("book needs Python 3.11 or later (tomllib).")
     with open(root / CONFIG_RELATIVE, "rb") as handle:
         value: object = tomllib.load(handle)
     for part in args.key.split("."):
@@ -1813,7 +1814,7 @@ def listed(paths: list[str], indent: str = "    ") -> list[str]:
 
 def qa_deployed(root: Path, config: Config) -> tuple[list[str], str, bool]:
     """
-    QA's deployed commit through `factory deploy status --target qa` — the function, not a subprocess,
+    QA's deployed commit through `book deploy status --target qa` — the function, not a subprocess,
     so it stays the one read-only code path. Returns its lines, the commit it named and whether that was
     a live read. Nothing it raises stops the plan: the plan says COULD NOT READ and carries on, and the
     skill stops at its QA baseline instead.
@@ -1866,7 +1867,7 @@ def command_sync_plan(root: Path, config: Config, args: argparse.Namespace) -> s
               f"  origin/dev   {dev}",
               f"  origin/qa    {qa or 'not found'} — the qa branch: NOT the QA baseline (nothing deploys from qa yet)",
               f"  checkout     {branch}, " + ("clean" if not dirty else f"{dirty} uncommitted path(s)"),
-              "", "QA's deployed commit — the QA baseline (factory deploy status --target qa, read-only):"]
+              "", "QA's deployed commit — the QA baseline (book deploy status --target qa, read-only):"]
     status, deployed, live = qa_deployed(root, config)
     lines += status
     baseline = commit_of(root, deployed) if deployed else ""
@@ -1936,7 +1937,7 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def parser(prog: str = "factory") -> argparse.ArgumentParser:
+def parser(prog: str = "book") -> argparse.ArgumentParser:
     # No abbreviations: an abbreviated option once hid the subcommand from the guard.
     top = argparse.ArgumentParser(prog=prog, description="The AI tools: pull requests, Jira, the files that steer the AI.",
                                   allow_abbrev=False)
@@ -1960,7 +1961,7 @@ def parser(prog: str = "factory") -> argparse.ArgumentParser:
     reviewed = sub.add_parser("reviewed", help="record /book:self-review's verdict for this commit (inside .git)")
     reviewed.add_argument("verdict", choices=["READY", "NOT-READY"])
     reviewed.add_argument("--fingerprint", default=None,
-                          help="the hash `factory fingerprint` printed when the review began; recorded only when "
+                          help="the hash `book fingerprint` printed when the review began; recorded only when "
                                "this commit holds exactly that content")
     sub.add_parser("fingerprint", help="the hash of what a review covers: the change against origin/dev, committed "
                                        "or not, untracked files included")
@@ -2017,8 +2018,8 @@ COMMANDS: dict[str, Callable] = {
 }
 
 
-def main(argv: list[str] | None = None, prog: str = "factory") -> int:
-    """The command, as `factory` or - from v1.4.0 - `book` (devtools/book.py), which only names it differently."""
+def main(argv: list[str] | None = None, prog: str = "book") -> int:
+    """The command, run by devtools/book.py as `book`."""
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -2038,12 +2039,12 @@ def main(argv: list[str] | None = None, prog: str = "factory") -> int:
     return 0 if ok else 1
 
 
-RENAME_NOTE = ("factory: the command is `book` now - python devtools/book.py <command> (`book verify`, `book pr open`, ...); "
-               "this name keeps working until v1.5.")
+# Not a command from v1.5: a hook, pipeline or habit still running this file is told so and fails, rather than
+# passing without having run.
+NOT_A_COMMAND = ("factory.py is not a command from Book v1.5: run python devtools/book.py <command> "
+                 "(`book verify`, `book pr open`, ...).")
 
 
 if __name__ == "__main__":
-    # Only a person at a terminal is told: the hooks, CI and the pipelines run this file and read its output.
-    if sys.stderr.isatty():
-        print(RENAME_NOTE, file=sys.stderr)
-    sys.exit(main())
+    print(NOT_A_COMMAND, file=sys.stderr)
+    sys.exit(2)

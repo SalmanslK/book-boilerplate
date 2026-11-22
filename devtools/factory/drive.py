@@ -1,6 +1,6 @@
 """
 Google Drive for the AI tools: the live FSD's last change (`modifiedTime`) and its comment threads —
-read only. `factory fsd-threads` asks the Doc itself instead of taking a session's word, and
+read only. `book fsd-threads` asks the Doc itself instead of taking a session's word, and
 `--save` keeps the threads beside the FSD snapshots.
 
 Which token is the person's choice, so it is in their private settings file outside the repository

@@ -22,8 +22,8 @@ protected_branches = ["dev", "qa", "uat", "main"]
 # (CLAUDE.md, Private settings). APP_LOCAL_SETTINGS overrides it.
 private_settings = "~/.app/local.toml"
 
-# This project's own names, for `factory book verify` (a name the Book template carries from another
-# project is a leftover; these are not) and the names `factory book init` wrote.
+# This project's own names, for `book verify` (a name the Book template carries from another
+# project is a leftover; these are not) and the names `book init` wrote.
 [book]
 name = "App"
 slug = "app"
@@ -99,14 +99,14 @@ reason = "was trialled and removed from this repository : it answered one of fou
 
 # ---------------------------------------------------------------- requirements
 #
-# A requirement id is `<id_prefix>-<section>-R<n>` (FSD-2.13.9-R04); `factory impact` finds the ids
+# A requirement id is `<id_prefix>-<section>-R<n>` (FSD-2.13.9-R04); `book impact` finds the ids
 # the traceability matrix ties to the changed files.
 
 [requirements]
 id_prefix = "FSD"
 traceability = "docs/Audit/spec-traceability.md"
 
-# `factory fsd-threads`: the live FSD Doc against the last check. The Doc's link is the line of
+# `book fsd-threads`: the live FSD Doc against the last check. The Doc's link is the line of
 # `links_file` starting with `fsd_link_label`; the last check is recorded in `live_check_record`.
 # The credential is a person's, so it is not here: `live_credential` lives in their private settings
 # file (`~/.app/local.toml`, CLAUDE.md "Private settings") under [requirements.sources] — e.g.
@@ -116,11 +116,11 @@ fsd_dir = "requirements/fsd"
 live_check_record = "requirements/fsd/read-me.txt"
 links_file = "requirements/read-me.txt"
 fsd_link_label = "FSD"
-# `factory requirements status`: LINKS sources /book:check-sources does not compare live (its
+# `book requirements status`: LINKS sources /book:check-sources does not compare live (its
 # "Out of scope"), by folder.
 out_of_scope = ["wireframes"]
 
-# `factory requirements status`: the folder under requirements/ that holds each LINKS line's
+# `book requirements status`: the folder under requirements/ that holds each LINKS line's
 # snapshots. A line belongs to the longest key its label starts with, case ignored.
 [requirements.sources.folders]
 "FSD" = "fsd"
@@ -134,8 +134,8 @@ out_of_scope = ["wireframes"]
 
 # The FE team's existing Google Drive folder the FE guides are published to (/book:publish-guides) —
 # its one owner: the skill and Publish-FeGuidesToDrive.ps1 read it from here, through
-# `python devtools/factory/factory.py config fe_guides.drive_folder_id`, and never repeat it.
-# `factory book verify` (N17) checks that. Folder link: https://drive.google.com/drive/folders/<id>
+# `python devtools/book.py config fe_guides.drive_folder_id`, and never repeat it.
+# `book verify` (N17) checks that. Folder link: https://drive.google.com/drive/folders/<id>
 [fe_guides]
 # Not the template's placeholder (manifest [source] fe_drive_folder_id), which init replaces in a copied Book.
 drive_folder_id = "fixture-drive-folder-1"
@@ -192,7 +192,7 @@ checks_only = ["docs/**", "requirements/**", "devtools/**", ".githooks/**", ".cl
 
 # ---------------------------------------------------------------- the review checklist's parts
 
-# `factory review-scope`: which parts of the review checklist a change needs read. Each row is a row
+# `book review-scope`: which parts of the review checklist a change needs read. Each row is a row
 # of the scope-triage table in review-method.md (`row` is its first cell, word for word; a test holds
 # the two equal), with the globs that place a path in it and the Pass B dimensions its "Normally N/A"
 # column names. A dimension is left out only when every row a path matched lists it N/A; a path no row
@@ -274,12 +274,12 @@ not_applicable = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "
 # ---------------------------------------------------------------- the files that steer the AI, Jira, Bitbucket
 
 # The files that steer the AI — its rules, skills, the tools, the guard, the checks, the
-# hooks and CI. A pull request that changes one passes `factory ai-files` (CI, every PR) only when an
+# hooks and CI. A pull request that changes one passes `book ai-files` (CI, every PR) only when an
 # owner made it, or an owner approved it after its latest commit — the destination branch's list,
 # never the PR's own. Owners are Bitbucket account ids
-# (`factory pr whoami`): a display name anyone can copy, an id no one can.
+# (`book pr whoami`): a display name anyone can copy, an id no one can.
 [ai_files]
-# One { name = "...", account_id = "..." } per owner (`factory pr whoami` prints the id). An empty
+# One { name = "...", account_id = "..." } per owner (`book pr whoami` prints the id). An empty
 # list matches no account, so a pull request that changes an AI file cannot pass — it fails closed.
 owners = [
     { name = "Owner One", account_id = "account-one" },
@@ -293,13 +293,13 @@ paths = [
 # Changed with ordinary feature work: a new endpoint's place in the Postman journey and its sample.
 except = ["devtools/checks/api_contracts_postman.py"]
 
-# Where `factory jira <key>` reads a Jira issue from. Read only.
+# Where `book jira <key>` reads a Jira issue from. Read only.
 # The credential is the person's own, in git's credential store for this site (devtools/README.md).
 [jira]
 site = "tracker.example"
 project = "PROJ"
 
-# What `factory protection --check` holds the live branch restrictions to: the rules
+# What `book protection --check` holds the live branch restrictions to: the rules
 # the architecture guide's branch-protection table decides. `kinds` must exist on every branch listed;
 # `minimums` must exist with at least that value. Exemptions on push and merge are
 # reported for a person to confirm, never failed on.
@@ -312,8 +312,8 @@ require_approvals_to_merge = 1
 require_passing_builds_to_merge = 1
 
 # While CI is switched off, devtools/checks/ci-local.sh is the gate before a pull
-# request: `factory pr open` wants its PASS for the very commit it opens, and `factory pr-check` a "Local
-# CI" section naming the pull request's head commit. How deep that run goes is `factory impact --ci`, from
+# request: `book pr open` wants its PASS for the very commit it opens, and `book pr-check` a "Local
+# CI" section naming the pull request's head commit. How deep that run goes is `book impact --ci`, from
 # the [[modules]] below and [impact] and [tier] above (docs/plans/local-ci-tiers.md). Set
 # `required = false` once CI runs on your own runner.
 [local_ci]
@@ -321,7 +321,7 @@ required = true
 
 # ---------------------------------------------------------------- deploy
 #
-# `factory deploy` (deploy.py), the steps /book:deploy runs. Addresses and paths, never secrets: the
+# `book deploy` (deploy.py), the steps /book:deploy runs. Addresses and paths, never secrets: the
 # server's `.env` holds those and is never read. **DEV and QA are the only tables, and the host is
 # fixed here** — no argument names a host, so nothing can point a deploy anywhere else (the deployment
 # plan §9 and the product runbook own these values). A `<placeholder>` stops the deploy and says which.

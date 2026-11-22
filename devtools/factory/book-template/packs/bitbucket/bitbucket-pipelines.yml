@@ -484,7 +484,7 @@ definitions:
           - python3 -m unittest discover -s devtools/checks -p "test_*.py" -v
 
     # Meant as a second layer, not the gate: this step runs from the pull request's own copy of this
-    # file, so a PR can edit or drop it, and a PR whose destination has no factory.py yet judges itself.
+    # file, so a PR can edit or drop it, and a PR whose destination has no AI tools yet judges itself.
     # The intended gate — the owners as default reviewers with a minimum number of approvals on the
     # destination branch, in Bitbucket's repository settings, which no pull request can change — is
     # not yet in place: it waits on a Bitbucket admin. Until then this step is the only check.
@@ -502,19 +502,25 @@ definitions:
           # an owner approved it after its latest commit; the owner re-runs this step after approving. Reads the
           # PR with the secured variable BITBUCKET_TOKEN (Pull requests: Read), never printed.
           # The destination's copy of the tools judges, with the destination's [ai_files]: a PR that
-          # edited the check or made its author an owner would otherwise pass itself. Only the PR that
-          # brings the tools to a branch without them runs its own copy, and says so.
+          # edited the check or made its author an owner would otherwise pass itself. A destination still on
+          # a Book older than v1.4.0 has no book.py: its own factory.py, still a command there, judges, as
+          # the 1.4.x pipeline ran it. Only the PR that brings the tools to a branch without them runs its
+          # own copy, and says so.
           - apk add --no-cache git curl
           - git fetch --quiet --unshallow || true
           - git fetch --quiet origin "+refs/heads/${BITBUCKET_PR_DESTINATION_BRANCH:-dev}:refs/remotes/origin/${BITBUCKET_PR_DESTINATION_BRANCH:-dev}"
           - |
             DEST="origin/${BITBUCKET_PR_DESTINATION_BRANCH:-dev}"
-            if git cat-file -e "$DEST:devtools/factory/factory.py" 2>/dev/null; then
+            if git cat-file -e "$DEST:devtools/book.py" 2>/dev/null; then
+              mkdir -p /tmp/destination && git archive "$DEST" devtools/book.py devtools/factory | tar -x -C /tmp/destination
+              FACTORY_ROOT="$PWD" python3 /tmp/destination/devtools/book.py ai-files
+            elif git cat-file -e "$DEST:devtools/factory/factory.py" 2>/dev/null; then
+              echo "$DEST holds a Book older than v1.4.0 (no devtools/book.py): its own factory.py judges this pull request, until a promotion brings it 1.5."
               mkdir -p /tmp/destination && git archive "$DEST" devtools/factory | tar -x -C /tmp/destination
-              FACTORY_ROOT="$PWD" python3 /tmp/destination/devtools/factory/factory.py ai-files
+              FACTORY_ROOT="$PWD" python3 /tmp/destination/devtools/factory/factory.py ai-files || { echo "$DEST's own factory.py ai-files failed: this pull request is not passed."; exit 1; }
             else
               echo "$DEST has no AI tools yet: this pull request's own copy judges it."
-              python3 devtools/factory/factory.py ai-files
+              python3 devtools/book.py ai-files
             fi
 
     - step: &factory-governance
@@ -534,7 +540,7 @@ definitions:
           - apk add --no-cache git curl
           - '[ -n "$BITBUCKET_TOKEN" ] || { echo "Set the secured variable BITBUCKET_TOKEN first."; exit 1; }'
           - 'PR_NUMBER=$(echo "$PR_NUMBER" | tr -d " "); [ -n "$PR_NUMBER" ] || { echo "Give PR_NUMBER: the pull request to check."; exit 1; }'
-          - python3 devtools/factory/factory.py pr-check "$PR_NUMBER"
+          - python3 devtools/book.py pr-check "$PR_NUMBER"
 
 # No `default`: a push to a work branch runs nothing. Check a branch before its pull request
 # with devtools/checks/ci-local.sh; the pull request runs everything but the image build, which a merge

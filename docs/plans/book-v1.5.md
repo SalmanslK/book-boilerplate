@@ -8,46 +8,62 @@ removes the alias and the stubs. Its row is in [`../project.md`](../project.md#p
 
 ## 1. Releasing the plugin first
 
-A template release pins the book plugin it needs: template v1.4.1's `.claude/settings.json` has
-`ref = "v0.5.1"`, and its `plugin_min` is 0.5.1. **Push the plugin's tag before the boilerplate's**
-(`v0.5.1`, then `v1.4.1`): a Book upgraded before the tag exists pins a release the marketplace cannot fetch.
+A template release pins the book plugin it needs: template v1.5.0's `.claude/settings.json` has
+`ref = "v0.6.0"`, and its `plugin_min` is 0.6.0. **Push the plugin's tag before the boilerplate's**
+(`v0.6.0`, then `v1.5.0`): a Book upgraded before the tag exists pins a release the marketplace cannot fetch.
+Plugin 0.6.0 runs only `devtools/book.py`, with no fallback to `factory.py`: every Book that pins it is on
+template 1.5.0, which has it.
 
-## 2. What still calls `factory`, and must switch when the alias goes
+**A long-lived branch older than v1.4.0 needs nothing first.** A project does not promote its base branch
+into `qa`, `uat` or `main` to take 1.5: that would release unfinished work. A pull request into a branch whose
+Book is older than v1.4.0 (`factory.py`, no `devtools/book.py`) is judged by that branch's own `factory.py`,
+which is still a command there (§2), until a promotion brings the branch 1.5. `book upgrade` names each
+protected branch still older than v1.4.0, read from the project's own refs, as information.
 
-Each was left on the old name on purpose in v1.4.0, because a project on an older Book still runs it:
+## 2. The command is `book` only
 
-- **The pipelines**, `devtools/factory/book-template/packs/bitbucket/bitbucket-pipelines.yml`: the AI-files
-  step (lines 512-517), which tests `$DEST:devtools/factory/factory.py` to run the destination branch's own
-  copy, and the `pr-check` step (line 537). They switch to `devtools/book.py` once no destination branch
-  predates v1.4.0.
-- **The plugin's `setup/SKILL.md`** (line 104): `factory.py book init --target <this repo>`.
-- **`deploy.py`'s user messages**, about 25 of them ("`factory deploy check` did not pass", "/deploy targets
-  DEV and QA only", its docstring and `--help`).
-- **The upgrade's report header**, `factory book upgrade - installed …`, in `book.py`.
-- **`fixture_project.py`** (line 137): its `[fe_guides]` comment names
-  `python devtools/factory/factory.py config fe_guides.drive_folder_id`.
-- **The plugin's fallback**: each skill's note that runs `devtools/factory/factory.py` on a Book before
-  v1.4.0, its allowed-tools in both forms, and the publish script's fallback to `factory.py`.
-- **`factory.py`'s rename note** and `book.py`'s fallback to a `main()` that takes no name.
-- **Code comments and docstrings** that still name a command as `factory <command>` (for example
-  `fixture_project.py`'s "What `factory protection --check` holds…"): renamed with the messages, in one pass.
-- **The guard's deploy check** (`factory_deploy_target` in `hooks/guard.py`) judges `python …/book.py`,
-  `python …/factory.py` and `python -m book|factory|devtools.book|devtools.factory.factory`. It does not yet
-  judge the script run directly (`./devtools/book.py deploy …`, by its shebang) or through `uv run`: add both
-  when the alias goes, with tests both ways.
+- **`devtools/book.py` is the command**; `devtools/factory/factory.py` is the module it runs. Run as a script,
+  `factory.py` says so and exits 2, so a hook, pipeline or habit left on the old name fails instead of passing
+  with nothing run. `book.py` refuses, the same way, a kept `factory.py` from before v1.4.0 whose `main()`
+  names no command; the upgrade names that file a must-merge CONFLICT first.
+- **The upgrade names a kept CI file, script or hook that still runs `factory.py`** (CHANGED or CONFLICT, so
+  the upgrade never rewrites it), however it is started.
+- **Every caller says `book`**: the hooks, the local CI, the pipelines (`book.py ai-files`, `book.py
+  pr-check`), the plugin's skills, `deploy.py`'s messages, the upgrade's, verify's and init's report headers
+  (`book upgrade - installed …`), the help text, comments and docstrings. `check-rules` counts a CI rule as run
+  only where a CI file runs `book.py <command>`; a project's own `CLAUDE.md` may still name a marker
+  `factory <command>`, and it reads the same.
+- **The pipelines' AI-files step** runs the destination branch's own `devtools/book.py` (with
+  `devtools/factory/`). A destination with only `factory.py` holds a Book from before v1.4.0: the step says so
+  in one line and runs that destination's own `factory.py ai-files`, as the 1.4.x pipeline did, so the
+  destination still judges the pull request; the step fails if that command fails. A destination with neither
+  has no AI tools yet, and the pull request's own copy judges it, as before.
+- **The upgrade's old-command note and `check-rules` leave that fallback alone**: it runs the destination's
+  copy, extracted to `/tmp/destination/`, never the project's own `factory.py`.
+- **The guard's deploy check** (`factory_deploy_target` in `hooks/guard.py`) judges the command however it
+  starts: `python …/book.py`, `python -m book|devtools.book`, `python -c` code that runs it through `runpy`, the
+  script run directly by its shebang (`./devtools/book.py deploy …`), and through `uv run` (with `-m` or
+  `--module`), `uvx`, `pipx run`, `poetry run`, `pipenv run` and `hatch run`. It judges every `--env` and
+  `--target` the command is given, not only the first. It still judges `factory.py` under the same forms: a
+  project mid-upgrade may keep an older `factory.py` (a CONFLICT) that still deploys, and judging a name that
+  no longer runs costs nothing.
 
-## 3. What goes
+## 3. The old names have no stub
 
-- The rename stubs: the v1.3.0 ones under `.claude/skills/` and the packs' (v1.3.0 and v1.4.0), all of which
-  say "removed in v1.5". The upgrade reports each REMOVED or DROPPED; the AI guide's *Old names* table stays
-  as the record of what each old name means.
-- `factory` as a command name, once §2 is done. `devtools/factory/factory.py` stays the module the command
-  runs; only the name a person types changes.
+- No rename stub is left under `.claude/skills/` or in a pack, and the template owns no skill: `book init`
+  creates no `.claude/skills/`, and verify's N16 passes a Book with none of its own.
+- **The upgrade** reports each stub a 1.4.x Book still has as DROPPED, in one note naming each old name and the
+  `/book:` name it pointed at, and says plainly that the old names stop working after this upgrade: the
+  project deletes those folders in the upgrade's pull request. A stub the project turned into a skill of its
+  own is no stub, and keeps the ordinary note for a retired skill.
+- **The AI guide's *Old names*** stays, as a plain lookup ("If you type an old name, use this instead"): with
+  the stubs gone it is the only place a person finds the new name.
 
 ## 9. Tasks
 
 | # | Task | FSD | Role | Status | Jira | PR | Merged |
 |---|---|---|---|---|---|---|---|
 | 1 | Push plugin tag v0.5.0, then release boilerplate v1.4.0 | — | BE | Built | — | — | 2026-11-22 |
-| 2 | Switch every §2 caller to `book` | — | BE | Not started | — | — | — |
-| 3 | Remove the alias and the rename stubs (§3) | — | BE | Not started | — | — | — |
+| 2 | Switch every §2 caller to `book` | — | BE | Built | — | — | — |
+| 3 | Remove the alias and the rename stubs (§3) | — | BE | Built | — | — | — |
+| 4 | Push plugin tag v0.6.0, then release boilerplate v1.5.0 | — | BE | Not started | — | — | — |

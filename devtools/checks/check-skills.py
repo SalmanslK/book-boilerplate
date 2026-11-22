@@ -7,7 +7,7 @@ description over the portable limit is cut where people and the model read it; a
 every skill's description has a budget in the session's context, past which the least-used skills
 lose their descriptions without a word. Nothing else checks any of that. Links inside skills are
 check-book.py's (it reads every tracked Markdown file); which skills a Book must have is
-`factory book verify`'s N16.
+`book verify`'s N16.
 
     python devtools/checks/check-skills.py [--root <path>]
 

@@ -43,8 +43,8 @@ plan; the reasoning is in [`architecture.md`](architecture.md).
 ### Layout and naming
 
 - **Where the Factory's referee lives:** in a Book + Factory install the kit puts it at
-  `devtools/ai-factory/factory.py`; the Book CLI is `devtools/book.py` (the `book` command), with
-  `devtools/factory/factory.py` working as `factory` until v1.5.
+  `devtools/ai-factory/factory.py`; the Book CLI is `devtools/book.py` (the `book` command), which runs
+  the module `devtools/factory/factory.py`; from v1.5 `factory` is no command.
 - **The boilerplate's own stack is `none`:** its only code is the Python tooling, tested by
   `run-self-tests.py`.
 - **One version stamp:** `book_version` (semver) in `factory.toml` and `manifest.toml`.

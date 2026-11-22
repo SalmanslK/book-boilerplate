@@ -1,6 +1,6 @@
 """
 The dotnet pack's review checklist: its dimension files (review-b1…b11 in `.claude/review/`) hold checks
-16–160 once each, each file its range, and `factory review-scope` reads the triage table. The method and
+16–160 once each, each file its range, and `book review-scope` reads the triage table. The method and
 Pass A (checks 1–15, the triage table, the one READY rule) are the book plugin's, tested there.
 """
 from __future__ import annotations

@@ -6,7 +6,7 @@ Book CLI, the guard, and the template `book init` copies. Python 3.11+, standard
 | Folder | What it holds | Runs where |
 |---|---|---|
 | [`checks/`](checks/) | The checks that refuse a bad commit, the generator of `docs/project.md`'s rollups, the local CI run, and their self-tests | `.githooks/pre-commit`, `.githooks/commit-msg`, `ci-local.sh` |
-| [`factory/`](factory/) | The Book CLI (`factory.py`, run as `python devtools/book.py <command>`: the `book` command, called `factory` before v1.4.0, which still works until v1.5) and the modules it calls for the Git host, the tracker and Drive; `book.py` (init, verify and upgrade); `deploy.py` (used when `[deploy]` is set) | A laptop, or a session |
+| [`factory/`](factory/) | The Book CLI (`factory.py`, run as `python devtools/book.py <command>`: the `book` command; `factory` before v1.4.0, and no command from v1.5) and the modules it calls for the Git host, the tracker and Drive; `book.py` (init, verify and upgrade); `deploy.py` (used when `[deploy]` is set) | A laptop, or a session |
 | [`factory/hooks/`](factory/hooks/) | The guard: refuses in a Claude Code session what `CLAUDE.md` says never to do | **Every Claude Code session in the repository** |
 | [`factory/book-template/`](factory/book-template/) | `manifest.toml`, the owner-document `skeletons/`, and the stack and host `packs/` | `book init`, `verify` and `upgrade` |
 

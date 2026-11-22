@@ -7,7 +7,7 @@
 # Bump `version` (semver, the same as factory.toml's book_version) with any change here, in
 # skeletons/ or in packs/; a copied Book carries the version it came from.
 
-version = "1.4.1"
+version = "1.5.0"
 
 # The guard hook's matcher must cover every tool it judges (N2).
 guard_matcher = ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Monitor", "Read",
@@ -16,12 +16,12 @@ guard_matcher = ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShe
 # The Book's skills and agents come from the book plugin, which every Book's settings enable (N16); a
 # project keeps no copy. From v1.4.0 the packs' skills are the plugin's too (/book:deploy; /book:check-guides,
 # /book:publish-guides, /book:release-notes), each applying only where `[book] packs` names its pack, and the
-# Book's command is `book` (devtools/book.py). `.claude/skills/` holds only the project's own skills and, until
-# v1.5, a stub per name a move retired.
+# Book's command is `book` (devtools/book.py). `.claude/skills/` holds only the project's own skills: v1.5
+# retired the old names and their stubs, and the template owns no skill.
 plugin = "book@book-plugins"
 # The oldest book plugin release this template's files work with. A Book pins the plugin to a release tag in
 # .claude/settings.json (`ref`); `book verify` refuses an unpinned or older one, and `book upgrade` names it (Book D39).
-plugin_min = "0.5.1"
+plugin_min = "0.6.0"
 skills = []
 
 # P folders: kept in git even when empty (N19), created with a .gitkeep by init.
@@ -48,7 +48,7 @@ names_exempt = ["devtools/factory/book-template/*", "devtools/factory/book.py", 
 # copied as they are).
 [copy]
 book = [
-  ".githooks/pre-commit", ".githooks/commit-msg", ".claude/settings.json", ".claude/skills/**/*",
+  ".githooks/pre-commit", ".githooks/commit-msg", ".claude/settings.json",
   "AGENTS.md", ".cursor/rules/docs.mdc", ".cursor/rules/tests.mdc", ".cursor/rules/boilerplate.mdc",
   "docs/plans/_template.md",
   "devtools/book.py", "devtools/factory/factory.py", "devtools/factory/bitbucket.py", "devtools/factory/jira.py",

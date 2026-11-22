@@ -1,5 +1,5 @@
 """
-Self-tests for jira.py and `factory jira`, against a fake Jira — no network, no credential.
+Self-tests for jira.py and `book jira`, against a fake Jira — no network, no credential.
 CI runs them with the tools'.
 """
 
@@ -240,7 +240,7 @@ class TransportTests(unittest.TestCase):
 
 
 class CommandTests(unittest.TestCase):
-    """`factory jira <key>`: this project's issues only, read through the stored credential."""
+    """`book jira <key>`: this project's issues only, read through the stored credential."""
 
     def jira(self, key: str) -> str:
         return factory.command_jira(HERE.parents[1], CONFIG, mock.Mock(key=key))

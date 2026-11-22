@@ -2203,48 +2203,89 @@ def program(token: str) -> str:
 
 
 PYTHONS = re.compile(r"^(python|python3(\.\d+)?|py)$")
-# The Book's command, under either name: factory.py, and from v1.4.0 devtools/book.py, which forwards to it.
+# The Book's command: devtools/book.py, and factory.py, the module it runs. From v1.5 factory.py is no command,
+# but it is still judged: a project mid-upgrade may keep an older copy (a CONFLICT) that deploys as one.
 # The script is its own path segment (`notebook.py` is not it), or - an unquoted Windows path reaches here with
 # its backslashes already dropped by the shell's own rules - the run-together `devtoolsbook.py` or
 # `devtoolsfactoryfactory.py`.
 COMMAND_SCRIPT = re.compile(r"(?:^|[/\\])(?:factory|book)\.py$|devtools(?:factory)?(?:factory|book)\.py$")
 
-# Or run as a module (`python -m book`, `-m devtools.book`, `-m devtools.factory.factory`, joined as `-mbook`).
-# Run directly (`./devtools/book.py`) or through `uv run`, the command is not judged yet: the v1.5 plan's §2.
+# Or run as a module (`python -m book`, `-m devtools.book`, `-m devtools.factory.factory`, joined as `-mbook`, or
+# uv's `--module book`).
 COMMAND_MODULE = re.compile(r"^(?:devtools\.)?(?:factory\.)?(?:book|factory)$")
+# Or from `python -c` code that runs the script or the module (`runpy.run_path('devtools/book.py')`).
+COMMAND_IN_CODE = re.compile(r"""run_path\(\s*(?:r?['"])[^'"]*(?:factory|book)\.py['"]|"""
+                             r"""run_module\(\s*['"](?:devtools\.)?(?:factory\.)?(?:book|factory)['"]""", re.I)
+# Tools that run a command in a project's environment: what follows their word is a Python, the script or a
+# module, as after `uv run`. `uvx` runs one directly (`uvx python devtools/book.py`).
+RUNNERS = {"uv": "run", "pipx": "run", "poetry": "run", "pipenv": "run", "hatch": "run", "uvx": None}
 
 
 def next_arg(args: list[str], index: int) -> str:
     return args[index + 1].lower() if index + 1 < len(args) else ""
 
 
+def module_option(args: list[str], index: int) -> bool:
+    """`-m book`, `-mbook`, `--module book` or `--module=book` at `index`, naming the Book's command."""
+    arg = args[index]
+    if arg in ("--module", "-m"):
+        return bool(COMMAND_MODULE.match(next_arg(args, index)))
+    if arg.startswith("--module="):
+        return bool(COMMAND_MODULE.match(arg.split("=", 1)[1].lower()))
+    return arg.startswith("-m") and not arg.startswith("--") and bool(COMMAND_MODULE.match(arg[2:].lower()))
+
+
+def command_arguments(name: str, args: list[str]) -> list[str] | None:
+    """
+    What follows the Book's command in `name args`, or None when it does not run it: through a Python
+    (`python …/book.py`, `python -m book`, `python -c "runpy.run_path('devtools/book.py')"`), run directly by
+    its shebang (`./devtools/book.py`), or through a runner (`uv run`, `uvx`, `pipx run`, `poetry run`,
+    `pipenv run`, `hatch run`), which runs either.
+    """
+    if name in RUNNERS:
+        word = RUNNERS[name]
+        if word is not None:
+            if word not in args:
+                return None
+            args = args[args.index(word) + 1:]  # the runner's own options sit before its word, its run options after
+    elif COMMAND_SCRIPT.search(name):
+        return args
+    elif not PYTHONS.match(name):
+        return None
+    for index, arg in enumerate(args):
+        if arg == "-c" and index + 1 < len(args) and COMMAND_IN_CODE.search(args[index + 1]):
+            # The code may set its own argv: its words are judged with what follows it.
+            return re.findall(r"[\w.=-]+", args[index + 1]) + args[index + 2:]
+        if COMMAND_SCRIPT.search(arg.lower()):
+            return args[index + 1:]
+        if module_option(args, index):
+            return args[index + 1 + (arg in ("-m", "--module")):]
+    return None
+
+
 def factory_deploy_target(name: str, args: list[str]) -> str | None:
     """
-    The environment a `python …/factory.py deploy …` or `python …/book.py deploy …` command names (the same
-    command under its v1.4.0 name, devtools/book.py), upper-cased — `DEV` when it names none, as deploy.py
-    defaults — or None when the command is not a deploy.
+    The environment a `book deploy …` command names (devtools/book.py, or the factory.py it runs, however it is
+    started: command_arguments), upper-cased — `DEV` when it names none, as deploy.py defaults — or None when the
+    command is not a deploy. Every `--env` and `--target` is judged, not only the first: the first one outside
+    DEV and QA is the answer.
     """
-    if not PYTHONS.match(name):
+    rest = command_arguments(name, args)
+    if rest is None or "deploy" not in rest:
         return None
-    scripts = [i for i, arg in enumerate(args) if COMMAND_SCRIPT.search(arg.lower())
-               or (arg.startswith("-m") and COMMAND_MODULE.match(arg[2:].lower() or next_arg(args, i)))]
-    scripts = [i + 1 if args[i] == "-m" else i for i in scripts]
-    if not scripts or "deploy" not in args[scripts[0] + 1:]:
-        return None
-    rest = args[scripts[0] + 1:]
     # `deploy status --target dev|qa|all` reads what is deployed; it names environments too, and
     # anything but those three is refused like an --env outside DEV and QA. `all` is DEV and QA.
-    target = flag_value(rest, "--target")
-    if target is None and any(arg.startswith("--t") and arg != "--target" for arg in rest):
+    # An abbreviation of either (`--tar`, `--en`): deploy.py refuses it, and the guard does not guess what it meant.
+    # Only a true prefix is one: `--to` (revert's commit) is an option of its own (Book D41).
+    flags = [arg.split("=", 1)[0] for arg in rest if arg.startswith("--")]
+    if any(flag != full and len(flag) > 2 and full.startswith(flag) for flag in flags for full in ("--target", "--env")):
         return "?"
-    value = flag_value(rest, "--env")
-    if value is None and any(arg.startswith("--e") and arg != "--env" for arg in rest):
-        return "?"  # an abbreviation: deploy.py refuses it, and the guard does not guess what it meant
-    env = (value or "DEV").strip().upper()
-    if target is not None and target.strip().upper() != "ALL":
-        # Both flags given: an --env outside DEV and QA is judged even beside a --target.
-        return env if value is not None and env not in ("DEV", "QA") else target.strip().upper()
-    return env
+    envs = [value.strip().upper() for value in flag_values(rest, "--env")]
+    targets = [value.strip().upper() for value in flag_values(rest, "--target")]
+    outside = [value for value in envs + [t for t in targets if t != "ALL"] if value not in ("DEV", "QA")]
+    if outside:
+        return outside[0]
+    return (envs or [t for t in targets if t != "ALL"] or ["DEV"])[0]
 
 
 def flag_value(args: list[str], *names: str) -> str | None:
@@ -2255,6 +2296,17 @@ def flag_value(args: list[str], *names: str) -> str | None:
             if arg.startswith(name + "="):
                 return arg.split("=", 1)[1]
     return None
+
+
+def flag_values(args: list[str], name: str) -> list[str]:
+    """Every value `name` is given (`--env A --env=B`): a later one wins in argparse, so each is judged."""
+    values = []
+    for index, arg in enumerate(args):
+        if arg == name and index + 1 < len(args):
+            values.append(args[index + 1])
+        elif arg.startswith(name + "="):
+            values.append(arg.split("=", 1)[1])
+    return values
 
 
 def target_directory(args: list[str]) -> str | None:
@@ -3899,12 +3951,12 @@ def shell_findings(command: str, cwd: str, repo: Repo, powershell: bool, depth: 
                     "This names UAT or production. Deployment from here is DEV and QA only; the rest goes "
                     "through the team's release process.", None))
         elif factory_deploy_target(name, args) not in (None, "DEV", "QA"):
-            # `factory deploy` runs its ssh and compose inside its own process, where the check above never
+            # `book deploy` runs its ssh and compose inside its own process, where the check above never
             # sees them: the environment it is given is the one word to judge. deploy.py refuses as well.
             findings.append(Finding(
                 "deploy-non-dev", DENY,
-                "book deploy (factory deploy before v1.4.0) targets DEV and QA only. UAT and production go "
-                "through the team's release process.", None))
+                "book deploy targets DEV and QA only. UAT and production go through the team's release "
+                "process.", None))
 
         positional = [arg for arg in args if not arg.startswith("-")]
         raw_positional = [raw_arg for arg, raw_arg in zip(args, raw_args) if not arg.startswith("-")]

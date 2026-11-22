@@ -1391,7 +1391,7 @@ class RulesJudgeTests(RepoTestCase):
         self.repo.write("devtools/factory/factory.py", reviewed_only +
                         "def recorded_local_ci(root): ...\n    result, at = recorded_local_ci(root)\n")
         self.assertEqual(self.judge(": `factory pr open`, local CI")[2], [])
-        # From v1.4.0 the command is `book`; a Book's markers may name either until the old name goes.
+        # The command is `book`; a project's own CLAUDE.md may still name it `factory`, and reads the same.
         self.assertEqual(self.judge(": `book pr open`, local CI")[2], [])
 
     def test_a_book_command_marker_is_judged_under_either_name(self):
@@ -1400,9 +1400,21 @@ class RulesJudgeTests(RepoTestCase):
         self.assertEqual(self.judge(": `factory impact`")[2], [])
         self.assertEqual(self.judge(": `book gone`")[2], ["book has no gone command"])
         self.assertEqual(self.judge(": `book impact`, CI")[2], ["CI does not run book impact"])
-        for script in ("devtools/factory/factory.py", "devtools/book.py"):
-            self.assertEqual(self.judge(": `book impact`, CI", f"      - python3 {script} impact --ci\n")[2], [],
-                             script)
+        self.assertEqual(self.judge(": `book impact`, CI", "      - python3 devtools/book.py impact --ci\n")[2], [])
+        # From v1.5 factory.py is no command: a pipeline still running it runs nothing.
+        self.assertEqual(self.judge(": `book impact`, CI", "      - python3 devtools/factory/factory.py impact --ci\n")[2],
+                         ["CI does not run book impact"])
+
+    def test_the_ai_files_fallback_to_an_older_destination_is_no_problem_and_no_proof(self):
+        # The AI-files step runs the destination's own factory.py on a branch older than v1.4.0: deliberate. With
+        # book.py beside it the rule holds; on its own it proves nothing about this Book's command.
+        self.repo.write("devtools/factory/factory.py", 'sub.add_parser("ai-files")\n')
+        fallback = ('            FACTORY_ROOT="$PWD" python3 /tmp/destination/devtools/factory/factory.py ai-files '
+                    '|| { echo "failed"; exit 1; }\n')
+        both = ('            FACTORY_ROOT="$PWD" python3 /tmp/destination/devtools/book.py ai-files\n' + fallback
+                + '            python3 devtools/book.py ai-files\n')
+        self.assertEqual(self.judge(": `book ai-files`, CI", both)[2], [])
+        self.assertEqual(self.judge(": `book ai-files`, CI", fallback)[2], ["CI does not run book ai-files"])
 
     def test_a_deleted_script_is_broken(self):
         self.assertIn("check-gone.py is gone", self.judge(": `check-gone.py`, CI")[2])

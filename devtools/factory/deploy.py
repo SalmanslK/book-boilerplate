@@ -1,16 +1,16 @@
 """
-factory deploy — the mechanical half of /book:deploy: every probe, gate, count and verdict the
+book deploy — the mechanical half of /book:deploy: every probe, gate, count and verdict the
 skill used to spell out as shell, run the same way every time and tested. The skill keeps the
 decisions: what to ask, when to stop, keep or revert.
 
-    factory deploy check   --env DEV|QA [--branch dev] --pre-tests run|skip --post-tests run|skip [--fix]
-    factory deploy gate    [--build-only]
-    factory deploy changes
-    factory deploy up
-    factory deploy smoke   [--break-stale-lock]
-    factory deploy revert  --to <sha>
-    factory deploy report
-    factory deploy status  [--target dev|qa|all]
+    book deploy check   --env DEV|QA [--branch dev] --pre-tests run|skip --post-tests run|skip [--fix]
+    book deploy gate    [--build-only]
+    book deploy changes
+    book deploy up
+    book deploy smoke   [--break-stale-lock]
+    book deploy revert  --to <sha>
+    book deploy report
+    book deploy status  [--target dev|qa|all]
 
 Each step reads and writes one state file inside .git (`factory-deploy.json`), so a later step knows
 what an earlier one found: `up` refuses QA without a passing gate for the commit it deploys, `revert`
@@ -23,7 +23,7 @@ environment what it runs, and reads the ledger only when the host cannot be reac
 
 **DEV and QA only.** The environments are the two tables under `[deploy]` in factory.toml and the
 host is its `ssh_host`; neither is ever an argument, so nothing here can be pointed at another box.
-UAT and production go through the team's release process. The guard refuses `factory deploy` naming
+UAT and production go through the team's release process. The guard refuses `book deploy` naming
 any other environment as well (devtools/README.md, the guard).
 
 Nothing here prints a secret: the server's `.env` is tested for existence only, the settings check
@@ -241,7 +241,7 @@ def load_state(root: Path) -> dict:
     except (OSError, ValueError) as error:
         raise DeployError(
             f"The deploy state file {path.name} is unreadable ({error}): fix or remove it, "
-            "then run `factory deploy check` again.") from None
+            "then run `book deploy check` again.") from None
 
 
 def save_state(root: Path, state: dict) -> None:
@@ -250,7 +250,7 @@ def save_state(root: Path, state: dict) -> None:
 
 def started(state: dict) -> dict:
     if not state.get("env"):
-        raise DeployError("No deploy is under way: run `factory deploy check` first.")
+        raise DeployError("No deploy is under way: run `book deploy check` first.")
     return state
 
 
@@ -491,7 +491,7 @@ def command_check(root: Path, config_raw: dict, args) -> tuple[str, bool]:
         if done.code == 0:
             findings = [(("OK", text + " (fixed)") if level == "FIX" else (level, text)) for level, text in findings]
     elif fixes:
-        findings.append(("FIX", "run `factory deploy check` again with --fix to apply: " + "; ".join(fixes)))
+        findings.append(("FIX", "run `book deploy check` again with --fix to apply: " + "; ".join(fixes)))
 
     if not any(level == "BLOCK" for level, _ in findings):
         settings = ssh(t, settings_script(t))
@@ -621,7 +621,7 @@ def command_changes(root: Path, config_raw: dict, args) -> tuple[str, bool]:
     # read here would see the commit the settings check already pulled.
     previous = state.get("server_before", "")
     if not SHA.match(previous):
-        raise DeployError("`factory deploy check` recorded no commit the server was on — run check again.")
+        raise DeployError("`book deploy check` recorded no commit the server was on — run check again.")
     to = f"origin/{t.branch}"
     if git(root, "cat-file", "-e", f"{previous}^{{commit}}").code != 0:
         raise DeployError(f"the server is on {previous[:12]}, which origin does not have — a person looks first.")
@@ -691,20 +691,20 @@ def command_up(root: Path, config_raw: dict, args) -> tuple[str, bool]:
     state = started(load_state(root))
     t = target(config_raw, state["env"], state["branch"])
     if not (state.get("check") or {}).get("ok"):
-        raise DeployError("`factory deploy check` did not pass for this deploy — nothing is replaced.")
+        raise DeployError("`book deploy check` did not pass for this deploy — nothing is replaced.")
     if "changes" not in state:
-        raise DeployError("run `factory deploy changes` first: a revert needs the commit the server was on.")
+        raise DeployError("run `book deploy changes` first: a revert needs the commit the server was on.")
     head = git(root, "rev-parse", "HEAD").out.strip()
     if head != state["commit"]:
         raise DeployError(f"HEAD moved to {head[:12]} since the check ({state['commit'][:12]}) — start again.")
     gate = state.get("gate") or {}
     gate_passed = gate.get("ok") and gate.get("commit") == head and not gate.get("build_only")
     if state["pre_tests"] == "run" and not gate_passed:
-        raise DeployError("the pre-deploy gate has not passed for this commit — run `factory deploy gate`.")
+        raise DeployError("the pre-deploy gate has not passed for this commit — run `book deploy gate`.")
     if state["pre_tests"] == "skip" and state["env"] != "DEV":
         raise DeployError(REFUSED_QA_SKIP)
     if state["post_tests"] == "run" and not (gate.get("ok") and gate.get("commit") == head):
-        raise DeployError("the smoke tests run --no-build: run `factory deploy gate --build-only` first.")
+        raise DeployError("the smoke tests run --no-build: run `book deploy gate --build-only` first.")
     q = shlex.quote
     profile = f" --profile {q(t.profile)}" if t.profile else ""
     # One SSH call so a dropped connection cannot leave it half applied; --ff-only because a merge made on
@@ -797,9 +797,9 @@ def take_smoke_lock(t: Target, commit: str, break_stale: bool) -> tuple[str, lis
         raise DeployError(f"{t.env}'s smoke lock is STALE — taken {since} ago ({who}), older than "
                           f"{SMOKE_LOCK_STALE_SECONDS // 3600} h, so its run most likely died. It is never broken on "
                           "its own: make sure no smoke run is still going against this host, then run "
-                          "`factory deploy smoke --break-stale-lock`.")
+                          "`book deploy smoke --break-stale-lock`.")
     raise DeployError(f"another smoke run holds {t.env}'s lock — taken {since} ago ({who}). One run per host at "
-                      "a time: wait for it to finish, then run `factory deploy smoke` again.")
+                      "a time: wait for it to finish, then run `book deploy smoke` again.")
 
 
 def release_smoke_lock(t: Target, token: str) -> str:
@@ -810,7 +810,7 @@ def release_smoke_lock(t: Target, token: str) -> str:
     if "LOCK not-ours" in done.out:
         return f"WARN  {t.env}'s smoke lock was no longer this run's — someone broke it; left as it is."
     return (f"WARN  {t.env}'s smoke lock could not be removed (exit {done.code}) and still holds the host. "
-            f"After {SMOKE_LOCK_STALE_SECONDS // 3600} h, `factory deploy smoke --break-stale-lock` clears it.")
+            f"After {SMOKE_LOCK_STALE_SECONDS // 3600} h, `book deploy smoke --break-stale-lock` clears it.")
 
 
 def command_smoke(root: Path, config_raw: dict, args) -> tuple[str, bool]:
@@ -965,12 +965,12 @@ def command_report(root: Path, config_raw: dict, args) -> tuple[str, bool]:
     first, kind = smoke_verdict(state)
     up = state.get("up")
     if up is None:
-        first, kind = "NOT deployed — the run stopped before `factory deploy up`.", DID_NOT_RUN
+        first, kind = "NOT deployed — the run stopped before `book deploy up`.", DID_NOT_RUN
     elif not up.get("ok"):
         # Never "Deployed": a failed migration keeps the old API serving, and a failed health check means the
         # new one is up but not working. Either way the smoke never ran.
         first, kind = ("Deploy FAILED — `up` failed or the API failed its health checks; the smoke tests did not "
-                       "run. See `factory deploy up`'s output for the first exception."), DID_NOT_RUN
+                       "run. See `book deploy up`'s output for the first exception."), DID_NOT_RUN
     revert = state.get("revert") or {}
     if revert.get("to"):
         first = f"Reverted to {revert['to'][:12]} after the smoke failed. " + first
@@ -1000,7 +1000,7 @@ def command_report(root: Path, config_raw: dict, args) -> tuple[str, bool]:
         f"  Backups:      " + " · ".join(f"{env} {value}" for env, value in backups.items()),
         f"  Reached at:   {smoke.get('url') or t.lan_url}",
         "  Pre-deploy:   " + ("SKIPPED by request" if state.get("pre_tests") == "skip" else
-                             "did not pass — see `factory deploy gate`" if not (state.get("gate") or {}).get("ok") else
+                             "did not pass — see `book deploy gate`" if not (state.get("gate") or {}).get("ok") else
                              " · ".join(f"{name} {c['passed']} passed" for name, c in gate.items() if c)
                              + f", {sum(c['skipped'] for c in gate.values() if c)} skipped"),
         "  Post-deploy:  " + ("SKIPPED by request" if state.get("post_tests") == "skip" else
@@ -1150,7 +1150,7 @@ def status_one(root: Path, config_raw: dict, env: str, records: list[dict]) -> t
         if last:
             lines += [f"  From the ledger's last record — NOT a live read; the host may run something else since:",
                       f"  Commit:       {last.get('commit', '')[:12]} (branch {last.get('branch') or '?'})",
-                      f"  Deployed:     {last.get('when', '?')} (recorded by `factory deploy report`)",
+                      f"  Deployed:     {last.get('when', '?')} (recorded by `book deploy report`)",
                       f"  Verdict:      {last.get('verdict', '?')}",
                       f"  Behind:       {behind(root, last.get('commit', ''))}"]
         else:

@@ -1,6 +1,6 @@
 """
 The requirements index (requirements/read-me.txt) read as data, and the weekly capture rule, for
-`factory requirements status` and devtools/checks/check-protected-paths.py — one reading, not two.
+`book requirements status` and devtools/checks/check-protected-paths.py — one reading, not two.
 
 The index has a LINKS section (`<label>: <link, or "none - <why>">`, one line per live source) and
 folder sections — HAS A LIVE LINK, and those with none (the template's NO LIVE LINK; an index may split it

@@ -262,7 +262,7 @@ class PrivateSettingsTests(unittest.TestCase):
 
 
 class ConfigValueTests(unittest.TestCase):
-    """`factory config <table.key>`: one value from factory.toml, never from the private settings."""
+    """`book config <table.key>`: one value from factory.toml, never from the private settings."""
 
     def run_config(self, key: str, private_text: str | None = None) -> tuple[int, str, str]:
         with tempfile.TemporaryDirectory() as folder:
@@ -299,7 +299,7 @@ class ConfigValueTests(unittest.TestCase):
 
 
 class SettingsCheckTests(unittest.TestCase):
-    """`factory settings --check`: names and set / not set only — never a value, its length, or a home path."""
+    """`book settings --check`: names and set / not set only — never a value, its length, or a home path."""
 
     DUMMY = "dummy-private-value-7Qx9"
     VARIABLES = [CONFIG.raw["deploy"]["smoke_url_variable"], *CONFIG.raw["deploy"]["smoke_credentials"]]
@@ -677,7 +677,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("1 of them are the guard's own", out)
         self.assertIn("`git apply`", out)
         self.assertIn("Your git name is not an owner", out)
-        self.assertIn("factory ai-files", out)
+        self.assertIn("book ai-files", out)
         self.assertNotIn("Test Person", out, "the committer's identity is compared, never printed")
         self.assertNotIn("example.invalid", out)
 
@@ -1374,7 +1374,7 @@ class RepositoryTests(unittest.TestCase):
         self.branch()
         code, out = self.factory("impact")
         self.assertEqual(code, 0, out)
-        self.assertIn("factory impact <paths", out)
+        self.assertIn("book impact <paths", out)
         country_file = self.root / "src" / "App.Domain" / "Features" / "Geography" / "Country.cs"
         country_file.parent.mkdir(parents=True)
         country_file.write_text("class Country {}\n", encoding="utf-8")
@@ -1454,7 +1454,7 @@ class RepositoryTests(unittest.TestCase):
 @unittest.skipUnless(shutil.which("git"), "needs git")
 class SyncPlanTests(unittest.TestCase):
     """
-    `factory sync-plan`, /book:sync-sources's Phase 0: the SHAs pinned, the last-sync line read from
+    `book sync-plan`, /book:sync-sources's Phase 0: the SHAs pinned, the last-sync line read from
     origin/dev, the mode and the delta set, QA's deployed commit through `deploy status` — with SSH faked
     as test_deploy.py fakes it, so nothing reaches a server — and nothing written.
     """
@@ -1635,7 +1635,7 @@ class SyncPlanTests(unittest.TestCase):
 
 
 class FsdThreadsTests(unittest.TestCase):
-    """`factory fsd-threads`: the right Doc, the threads as a snapshot, and never a quiet pass."""
+    """`book fsd-threads`: the right Doc, the threads as a snapshot, and never a quiet pass."""
 
     DOC = "FsdDoc0000000000000000000000"
 
@@ -1850,7 +1850,7 @@ FOLDERS = {"FSD": "fsd", "Permissions matrix": "permissions-matrix", "QA": "qa-a
 
 
 class FsdPageTests(unittest.TestCase):
-    """`factory fsd-page`: the highest revision numerically, the section's pages, and never a guess."""
+    """`book fsd-page`: the highest revision numerically, the section's pages, and never a guess."""
 
     CONTENTS = ("Shop App Specifications........................ 3\n"
                 "    Onboarding and Sign In........................ 3\n"
@@ -1999,7 +1999,7 @@ FOLDERS = {"FSD": "fsd", "Permissions matrix": "permissions-matrix", "QA": "qa-a
 
 @unittest.skipUnless(shutil.which("git"), "needs git")
 class RequirementsStatusTests(unittest.TestCase):
-    """`factory requirements status`: the index and our snapshots, offline; nothing live is ever up to date."""
+    """`book requirements status`: the index and our snapshots, offline; nothing live is ever up to date."""
 
     TODAY = __import__("datetime").date(2027, 1, 6)  # a Wednesday; its week began 2027-01-04
 
@@ -2148,7 +2148,7 @@ class SnapshotsTests(unittest.TestCase):
 
 
 class BookCommandTests(unittest.TestCase):
-    """devtools/book.py: the command under its v1.4.0 name, forwarding to factory.py, which still works."""
+    """devtools/book.py: the command, running factory.py, which from v1.5 is no command of its own."""
 
     ENTRY = HERE.parent / "book.py"
 
@@ -2176,7 +2176,7 @@ class BookCommandTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout.strip(), str(factory.load_config(HERE.parents[1]).raw.get("book_version")))
 
-    def test_a_factory_py_kept_from_before_v140_runs_under_its_old_name_and_says_what_to_merge(self):
+    def test_a_factory_py_kept_from_before_v140_runs_nothing_and_says_what_to_merge(self):
         calls = []
 
         def old_main(argv):  # 1.3.x's main(), which names no command
@@ -2185,17 +2185,18 @@ class BookCommandTests(unittest.TestCase):
 
         err = io.StringIO()
         with mock.patch.object(self.entry, "factory", mock.Mock(main=old_main)), contextlib.redirect_stderr(err):
-            self.assertEqual(self.entry.main(["verify"]), 0)
-        self.assertEqual(calls, [["book", "verify"]])
+            self.assertEqual(self.entry.main(["verify"]), 2)
+        self.assertEqual(calls, [], "an unmerged factory.py is never run")
         self.assertIn("devtools/factory/factory.py predates Book v1.4.0", err.getvalue())
         self.assertTrue(self.entry.names_itself(), "this repository's own factory.py names the command")
 
-    def test_the_old_name_tells_only_a_person_at_a_terminal(self):
+    def test_factory_py_is_no_command_and_says_what_to_run(self):
+        # A hook, pipeline or habit still running it fails, rather than passing with nothing run.
         done = subprocess.run([sys.executable, str(HERE / "factory.py"), "config", "book_version"],
                               capture_output=True, text=True, encoding="utf-8")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertNotIn("the command is `book` now", done.stderr)  # piped, as the hooks and CI run it
-        self.assertIn("python devtools/book.py", factory.RENAME_NOTE)
+        self.assertEqual(done.returncode, 2, done.stdout)
+        self.assertEqual(done.stdout, "")
+        self.assertIn("python devtools/book.py <command>", done.stderr)
 
 
 class ShippedTextTests(unittest.TestCase):

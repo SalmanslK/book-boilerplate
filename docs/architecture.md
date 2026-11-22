@@ -21,7 +21,7 @@ every project, and `book verify` can say a leftover name from another project is
 
 - `devtools/checks/` — one script per rule family, each runnable alone, each with its self-tests in
   `test_checks.py`. Standard library only, Python 3.11+.
-- `devtools/factory/` — `factory.py` (the CLI), one module per outside system (`bitbucket.py`,
+- `devtools/factory/` — `factory.py` (the CLI's commands, run as `devtools/book.py`), one module per outside system (`bitbucket.py`,
   `jira.py`, `drive.py`), `book.py` (init, verify and upgrade), `deploy.py` (the deploy steps, used when
   `[deploy]` is set), `hooks/guard.py`.
 - `devtools/factory/book-template/` — `manifest.toml` (what `init` copies and `verify` expects),
@@ -195,7 +195,7 @@ Scripts are `check-<rule>.py` (fails on a broken rule), `gen-<doc>.py` (writes a
 
 | Trade-off | Why we accept it |
 |---|---|
-| The Book CLI is `book` (`devtools/book.py`), and `devtools/factory/factory.py` keeps working as `factory` until v1.5 | Projects on an older Book, their pipelines and their hooks still call `factory.py`; the alias goes in its own release ([the v1.5 plan](plans/book-v1.5.md)). The module stays `devtools/factory/factory.py`. In a Book + Factory install the referee goes to `devtools/ai-factory/` |
+| The Book CLI is `book` (`devtools/book.py`); `devtools/factory/factory.py` is the module it runs and no command: run, it says so and exits 2, and the guard still judges a deploy through it | A hook or pipeline left on the old name fails, rather than passing with nothing run; a project mid-upgrade may keep an older copy that still deploys, so the guard's deploy rule still covers that name. The pipelines' AI-files step refuses a destination branch from before v1.4.0, which has no `devtools/book.py`, rather than letting the pull request judge itself ([the v1.5 plan](plans/book-v1.5.md)). In a Book + Factory install the referee goes to `devtools/ai-factory/` |
 | `ai-files`, `pr` and `protection` speak Bitbucket only | The projects using the Book are on Bitbucket; with no Bitbucket remote they report `N/A`, never `OK`. GitHub is a later pack |
 | The boilerplate has no CI runner | It is tooling only; `ci-local.sh` runs the same checks, and its PASS is required by `book pr open` |
 | A pack's tests run only in a Book that installed it | They test files that are not live here; `test_book.py` installs every stack and pack into a scratch repository and checks the files land; the pack's own tests run in the Book that installed it |

@@ -1,6 +1,6 @@
 """
 Self-tests for the deploy pack's checks, beside the Book's own in test_checks.py (whose helpers they use).
-`factory book init` copies this file in with the pack:
+`book init` copies this file in with the pack:
 
     python3 devtools/checks/run-self-tests.py devtools/checks
 """

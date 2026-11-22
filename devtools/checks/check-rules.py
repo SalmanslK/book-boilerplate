@@ -9,7 +9,7 @@ CI file, one marked "pre-commit" is in `.githooks/pre-commit`; the guard is wire
 settings and its tests run in CI.
 
 The instruction files are every tracked `CLAUDE.md` outside `devtools/factory/book-template/` (a
-pack's rules are live only once `factory book init` copies them). "CI" is the CI files
+pack's rules are live only once `book init` copies them). "CI" is the CI files
 (`[checks] ci_files` in devtools/factory/factory.toml) together with `devtools/checks/ci-local.sh`,
 the local run that stands in for CI while there is none; the test command CI must run is `[commands]
 test`. A marker that names nothing, or names
@@ -194,7 +194,7 @@ def judge(marker: str, classes: set[str], pipelines: str, precommit: str,
                 problems.append(".githooks/commit-msg is not committed executable (mode 100755)")
             else:
                 ran.append("every commit")
-        elif name.startswith(("factory pr open", "book pr open")):  # the command is `book` from v1.4.0
+        elif name.startswith(("factory pr open", "book pr open")):  # a project's own docs may still say `factory`
             factory = live(read("devtools/factory/factory.py", root))
             if "ai files" in words:
                 # the marker names the AI files line, which pr open requires when the branch changes one.
@@ -223,8 +223,9 @@ def judge(marker: str, classes: set[str], pipelines: str, precommit: str,
             command = name.split()[1]
             if f'add_parser("{command}"' not in live(read("devtools/factory/factory.py", root)):
                 problems.append(f"book has no {command} command")
-            elif re.search(r"\bCI\b", marker) and not any(f"{script} {command}" in live(pipelines)
-                                                          for script in ("factory.py", "book.py")):
+            # CI runs the command as book.py: from v1.5 factory.py is no command, so a pipeline still running
+            # factory.py runs nothing.
+            elif re.search(r"\bCI\b", marker) and f"book.py {command}" not in live(pipelines):
                 problems.append(f"CI does not run book {command}")
             else:
                 ran.append("CI" if re.search(r"\bCI\b", marker) else name)

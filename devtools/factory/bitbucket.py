@@ -1,7 +1,7 @@
 """
-Bitbucket Cloud for the AI tools (`factory pr`, `ai-files`, `pr-check`, `protection`): a pull
+Bitbucket Cloud for the AI tools (`book pr`, `ai-files`, `pr-check`, `protection`): a pull
 request's approvals, description and activity, and the repository's branch restrictions — and two
-writes, opening a pull request (`factory pr open`) and posting a comment (`factory pr comment`), as
+writes, opening a pull request (`book pr open`) and posting a comment (`book pr comment`), as
 the person whose token it is.
 
 The token comes from BITBUCKET_TOKEN (CI's secured variable) or, on a laptop,

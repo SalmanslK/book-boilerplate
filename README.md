@@ -14,7 +14,7 @@ in `devtools/factory/factory.toml`.
   `ci-local.sh` before a pull request.
 - **The guard** (`devtools/factory/hooks/guard.py`) refuses, inside a Claude Code session, what the rules
   say never to do.
-- **The skills** (`.claude/skills/`) and **agents** (`.claude/agents/`) are the habits: commit, review,
+- **The skills** and **agents**, from the book plugin (`/book:<name>`), are the habits: commit, review,
   audit, sync, report.
 
 ## Install

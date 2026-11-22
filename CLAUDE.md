@@ -56,7 +56,7 @@ Never carry on with what you could not read, and never report a check you could 
 | `requirements/` | **Read-only.** The boilerplate's own specification as snapshots: `fsd/` holds every revision as `- V<n>.md` — **build from the highest number** (a lexical sort puts V9 above V15). The index is `requirements/read-me.txt`. Only `/book:check-sources` adds to it *[enforced: `check-protected-paths.py`, pre-commit]*. |
 | `devtools/checks/` | The checks the hooks and the local CI run, and their self-tests. |
 | `devtools/factory/` | The Book CLI (`factory.py`, run as `python devtools/book.py <command>`), the guard (`hooks/`), and the template `book init` copies (`book-template/`, with the stack and host packs). |
-| `.claude/` | The skills, the two Book agents, and the hook settings. |
+| `.claude/` | The hook settings and the book plugin's pin: the Book's skills and agents are the plugin's. |
 | `tests/` | Only [`tests/CLAUDE.md`](tests/CLAUDE.md): the self-tests sit beside the code they test. |
 
 ## Branches

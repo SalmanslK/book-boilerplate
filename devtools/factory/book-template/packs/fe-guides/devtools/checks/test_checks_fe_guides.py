@@ -1,6 +1,6 @@
 """
 Self-tests for the fe-guides pack's check and skill script, beside the Book's own in test_checks.py (whose
-helpers they use). `factory book init` copies this file in with the pack, whatever the stack:
+helpers they use). `book init` copies this file in with the pack, whatever the stack:
 
     python3 devtools/checks/run-self-tests.py devtools/checks
 """

@@ -8,7 +8,7 @@
       "source": {
         "source": "github",
         "repo": "SalmanslK/book-plugin",
-        "ref": "v0.5.1"
+        "ref": "v0.6.0"
       },
       "autoUpdate": false
     }

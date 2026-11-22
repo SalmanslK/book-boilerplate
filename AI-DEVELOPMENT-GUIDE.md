@@ -39,17 +39,11 @@ Documentation skills differ by **what they compare**:
 
 ### Old names
 
-v1.3.0 moved the Book's own skills and agents into the **book plugin** (each called `/book:<name>`) and
-renamed some; v1.4.0 moved the packs' skills there too, and named the Book's command `book`
-(`python devtools/book.py <command>`; `devtools/factory/factory.py` still works). An old name still in a
-doc, a chat or a habit means the new one here. Until v1.5 a stub under each old skill name this project had
-says the same and does nothing else.
+The Book's skills and agents are the **book plugin**'s, each called `/book:<name>`, and its command is `book`
+(`python devtools/book.py <command>`). The old names do nothing from v1.5: no stub answers them, and
+`devtools/factory/factory.py` is no command. **If you type an old name, use this instead:**
 
-The plugin is pinned to a release tag (`ref` in `.claude/settings.json`'s `extraKnownMarketplaces`), so a
-new plugin release reaches the project only through a reviewed change: take one by moving `ref` in a pull
-request. `book verify` refuses an unpinned plugin or one older than the template needs.
-
-| Before | Now |
+| Old name | Use instead |
 |---|---|
 | `/requirements-check` | `/book:check-sources` |
 | `/requirements-sync` | `/book:sync-sources` |
@@ -65,11 +59,16 @@ request. `book verify` refuses an unpinned plugin or one older than the template
 | `/docs-consistency` | `/book:check-consistency` |
 | `/docs-trim` | `/book:trim` |
 | `/book-setup`, `/plan-feature`, `/book-upgrade` | `/book:setup`, `/book:plan`, `/book:upgrade` |
-| agents `book-reviewer`, `book-tester` | agents `book:reviewer`, `book:tester` (they became the plugin's `reviewer` and `tester`, with no stub: the upgrade stubs skills only) |
-| `/deploy-dev-qa`, and `/deploy` before v1.4.0 (deploy pack) | `/book:deploy` |
-| `/fe-guides-publish`, `/fe-guides-check`, and `/publish-guides`, `/check-guides` before v1.4.0 (fe-guides pack) | `/book:publish-guides`, `/book:check-guides` |
-| `/release-notes` before v1.4.0 (fe-guides pack) | `/book:release-notes` |
-| `factory <command>` (`python devtools/factory/factory.py`), before v1.4.0 | `book <command>` (`python devtools/book.py`) |
+| agents `book-reviewer`, `book-tester` | agents `book:reviewer`, `book:tester` |
+| `/deploy`, `/deploy-dev-qa` (deploy pack) | `/book:deploy` |
+| `/check-guides`, `/fe-guides-check` (fe-guides pack) | `/book:check-guides` |
+| `/publish-guides`, `/fe-guides-publish` (fe-guides pack) | `/book:publish-guides` |
+| `/release-notes` (fe-guides pack) | `/book:release-notes` |
+| `factory <command>` (`python devtools/factory/factory.py`) | `book <command>` (`python devtools/book.py`) |
+
+The plugin is pinned to a release tag (`ref` in `.claude/settings.json`'s `extraKnownMarketplaces`), so a
+new plugin release reaches the project only through a reviewed change: take one by moving `ref` in a pull
+request. `book verify` refuses an unpinned plugin or one older than the template needs.
 
 ## Agents
 

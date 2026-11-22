@@ -11,8 +11,8 @@ If this file and `CLAUDE.md` disagree, `CLAUDE.md` wins. `docs/` and `tests/` ea
 ## Skills and agents
 
 The Book's skills and its two agents (`reviewer`, `tester`) come from the **book plugin**, called
-`/book:<name>` in Claude Code. The project's own skills, a pack's among them, are under
-[`.claude/skills/`](.claude/skills/), which Cursor also loads — do not copy them under `.cursor/`.
+`/book:<name>` in Claude Code, a pack's skills among them. The project's own skills, if it adds any, go under
+`.claude/skills/`, which Cursor also loads — do not copy them under `.cursor/`.
 
 Each skill says when to use it in its own description; how the documentation skills differ is
 [the AI guide's table](AI-DEVELOPMENT-GUIDE.md#which-docs-skill) — not repeated here.

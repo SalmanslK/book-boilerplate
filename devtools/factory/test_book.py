@@ -1,5 +1,5 @@
 """
-Self-tests for book.py, `factory book verify` and `factory book init`. Each check runs against a
+Self-tests for book.py, `book verify` and `book init`. Each check runs against a
 throwaway repository: a correct fixture passes it, a broken one fails it. The existing checks
 (check-book.py and the rest) are answered by a fake, so nothing here runs them or the network.
 
@@ -138,7 +138,7 @@ email-templates/
   -> designs
 """
 
-PINNED = {"book-plugins": {"source": {"source": "github", "repo": "owner/book-plugin", "ref": "v0.5.1"},
+PINNED = {"book-plugins": {"source": {"source": "github", "repo": "owner/book-plugin", "ref": "v0.6.0"},
                            "autoUpdate": False}}
 SETTINGS = {"attribution": {"commit": "", "pr": ""}, "extraKnownMarketplaces": PINNED,
             "enabledPlugins": {"book@book-plugins": True}, "hooks":{"PreToolUse": [{"matcher": MATCHER, "hooks": [
@@ -199,9 +199,9 @@ def fixture_files() -> dict[str, str]:
         "requirements/qa-artifacts/Tracker.xlsx": "x",
         "requirements/qa-artifacts/read-me.txt": "Link: in requirements/read-me.txt.\n\nLast checked: never\n",
         ".claude/skills/publish-guides/SKILL.md":
-            SKILL.format(name="publish-guides") + "The folder: `factory config fe_guides.drive_folder_id`.\n",
+            SKILL.format(name="publish-guides") + "The folder: `book config fe_guides.drive_folder_id`.\n",
         ".claude/skills/publish-guides/Publish-FeGuidesToDrive.ps1":
-            "param([string]$FolderId)\nif (-not $FolderId) { $FolderId = factory config fe_guides.drive_folder_id }\n",
+            "param([string]$FolderId)\nif (-not $FolderId) { $FolderId = book config fe_guides.drive_folder_id }\n",
     }
     for skill in MANIFEST["skills"]:
         files.setdefault(f".claude/skills/{skill}/SKILL.md", SKILL.format(name=skill))
@@ -475,6 +475,10 @@ class EachCheck(BookCase):
         self.assertFails(book.n16_skills)
         shutil.rmtree(self.root / ".claude/skills/commit")
         self.assertPasses(book.n16_skills)
+        # From v1.5 the template owns no skill: a Book with none of its own has no .claude/skills/ at all.
+        shutil.rmtree(self.root / ".claude/skills")
+        self.assertPasses(book.n16_skills)
+        self.assertIn("none of the project's own", " ".join(l.render() for l in book.n16_skills(self.ctx())))
         # The Book's skills are the plugin's: settings that do not enable it leave the Book without them.
         for settings in ('{"enabledPlugins": {"book@book-plugins": false}}\n', "{}\n", "not json\n"):
             with self.subTest(settings):
@@ -491,9 +495,10 @@ class EachCheck(BookCase):
             line = next(l for l in book.n16_skills(self.ctx()) if l.element == "the book plugin is pinned to a release")
             return line.status, line.render()
 
-        self.assertEqual(book.OK, pin_status()[0], "the fixture pins v0.5.1, this template's plugin_min")
+        self.assertEqual(book.OK, pin_status()[0], "the fixture pins v0.6.0, this template's plugin_min")
         source = {"source": "github", "repo": "owner/book-plugin"}
-        for ref, status in (("v9.0.0", book.OK), ("v0.3.0", book.WRONG), ("v0.4.0", book.WRONG), ("v0.5.0", book.WRONG), (None, book.WRONG),
+        for ref, status in (("v9.0.0", book.OK), ("v0.3.0", book.WRONG), ("v0.4.0", book.WRONG), ("v0.5.0", book.WRONG), ("v0.5.1", book.WRONG),
+                            (None, book.WRONG),
                             ("main", book.WRONG),
                             ("e1e60175b0fbacdcc28342946e20b41461fe7d7a", book.CONFIRM),
                             ("E1E60175B0FBACDCC28342946E20B41461FE7D7A", book.CONFIRM)):
@@ -924,7 +929,7 @@ class PluginNotes(unittest.TestCase):
         self.assertIn("3 old skill or agent file(s)", text, "the agent, the reference and the edited SKILL.md")
 
     def test_a_v134_pack_book_is_told_its_pack_skills_moved_too(self):
-        # v1.4.0: an edited pack skill is a CONFLICT (it takes the stub), its scripts are DROPPED.
+        # v1.4.0: an edited pack skill is a CONFLICT (it took the stub then), its scripts are DROPPED.
         rows = [(book.CONFLICT, ".claude/skills/deploy/SKILL.md"),
                 (book.DROPPED, ".claude/skills/check-guides/scripts/guides_check.py"),
                 (book.CHANGED, ".claude/skills/release-notes/SKILL.md")]
@@ -932,6 +937,39 @@ class PluginNotes(unittest.TestCase):
         self.assertIn("2 old skill or agent file(s) a move into the book plugin retired", text)
         self.assertIn("v1.4.0 the packs' skills", text)
         self.assertIn("[deploy]", text, "where an edited pack skill's project facts go")
+
+    def test_a_v14_books_old_name_stubs_are_dropped_and_the_old_names_stop_working(self):
+        stub = ("---\nname: {0}\ndescription: Renamed to /book:{1}, in the book plugin. This old name is removed in "
+                "v1.5.\ndisable-model-invocation: true\n---\n\n# /{0} was renamed\n")
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder)
+            # The project's own copy of the template carries the pack's stub too: one old name, two files.
+            pack_copy = "devtools/factory/book-template/packs/deploy/.claude/skills/deploy/SKILL.md"
+            for rel, old, new in ((".claude/skills/review-branch/SKILL.md", "review-branch", "self-review"),
+                                  (".claude/skills/deploy/SKILL.md", "deploy", "deploy"), (pack_copy, "deploy", "deploy")):
+                path = target / rel
+                path.parent.mkdir(parents=True)
+                path.write_text(stub.format(old, new), encoding="utf-8")
+            # A stub the project turned into a skill of its own is no stub: it keeps the ordinary note.
+            edited = target / ".claude/skills/commit/SKILL.md"
+            edited.parent.mkdir(parents=True)
+            edited.write_text("---\nname: commit\ndescription: Our own commit steps.\n---\n", encoding="utf-8")
+            rows = [(book.DROPPED, ".claude/skills/deploy/SKILL.md"),
+                    (book.DROPPED, ".claude/skills/review-branch/SKILL.md"),
+                    (book.DROPPED, ".claude/skills/commit/SKILL.md"),
+                    (book.DROPPED, pack_copy)]
+            manifest = {**self.MANIFEST, "version": "1.5.0"}
+            text = "\n".join(book.plugin_notes(target, {}, manifest, rows))
+            (target / "AGENTS.md").write_text("Skills are under [`.claude/skills/`](.claude/skills/).\n", encoding="utf-8")
+            linked = "\n".join(book.plugin_notes(target, {}, manifest, rows))
+        self.assertIn("WRONG 3 old-name stub(s) are DROPPED below (/deploy -> /book:deploy, /review-branch -> "
+                      "/book:self-review): template 1.5.0 retires the old names, so they stop working after this "
+                      "upgrade", text)
+        self.assertIn("under .claude/skills/ (and 1 in devtools/factory/book-template/packs/)", text)
+        self.assertIn("1 old skill or agent file(s)", text, "only the edited one, which may hold a local step")
+        self.assertNotIn("AGENTS.md", text)
+        self.assertIn("AGENTS.md links to .claude/skills/", linked)
+        self.assertEqual(book.stub_target(target / "gone"), "")
 
     def test_a_dropped_test_that_loads_a_retired_script_is_named_with_it(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -979,13 +1017,104 @@ class PluginNotes(unittest.TestCase):
             self.assertEqual(book.plugin_notes(Path(folder), self.OLD_SCOPE, {}, []), [])
 
 
+class OldCommandNotes(unittest.TestCase):
+    """From v1.5 factory.py is no command: a kept CI file, script or hook still running it is named."""
+
+    def test_a_kept_pipeline_running_factory_py_is_named_and_a_test_or_a_mere_path_is_not(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder)
+            files = {
+                "bitbucket-pipelines.yml": '          - python3 devtools/factory/factory.py pr-check "$PR_NUMBER"\n',
+                ".githooks/pre-commit": '$py "$root/devtools/book.py" ai-files --staged\n',
+                "devtools/checks/ci-local.sh": 'git cat-file -e "$DEST:devtools/factory/factory.py"\n',
+                "devtools/factory/hooks/test_guard.py": '("x", "python devtools/factory/factory.py deploy up", set()),\n',
+                "ci/old.yml": "  - py -3 devtools\\factory\\factory.py ai-files\n",
+                "ci/versioned.yml": "  - python3.12 devtools/factory/factory.py pr-check 1\n",
+                "ci/uv.sh": "uv run devtools/factory/factory.py impact --ci\n",
+                "ci/direct.sh": "set -e\n./devtools/factory/factory.py config base_ref\n",
+                "ci/variable.sh": '$PY "$root/devtools/factory/factory.py" ai-files --staged\n',
+                "ci/braced.sh": "${PY} devtools/factory/factory.py fingerprint\n",
+                # The template's own pipeline names factory.py only as a path git reads: no note.
+                "ci/reads.yml": ('elif git cat-file -e "$DEST:devtools/factory/factory.py" 2>/dev/null; then\n'
+                                 '  echo "a Book from before v1.4.0"\n'),
+                "ci/redirect.sh": "ls devtools/factory/factory.py 2>/dev/null\n",
+                # The AI-files step's fallback runs the destination's copy on a branch older than v1.4.0: no note.
+                "ci/destination.yml": ('  FACTORY_ROOT="$PWD" python3 /tmp/destination/devtools/factory/factory.py '
+                                       'ai-files || { echo "failed"; exit 1; }\n'),
+            }
+            for rel, text in files.items():
+                (target / rel).parent.mkdir(parents=True, exist_ok=True)
+                (target / rel).write_text(text, encoding="utf-8")
+            rows = [(book.CONFLICT, "bitbucket-pipelines.yml"), (book.CHANGED, ".githooks/pre-commit"),
+                    (book.CHANGED, "devtools/checks/ci-local.sh"), (book.CONFLICT, "devtools/factory/hooks/test_guard.py"),
+                    (book.UNKNOWN, "ci/old.yml")] + [(book.CHANGED, f"ci/{name}") for name in (
+                        "versioned.yml", "uv.sh", "direct.sh", "variable.sh", "braced.sh", "reads.yml", "redirect.sh",
+                        "destination.yml")]
+            text = "\n".join(book.old_command_notes(target, rows))
+            self.assertEqual(book.old_command_notes(target, [(book.BEHIND, "bitbucket-pipelines.yml")]), [],
+                             "a file upgrade rewrites needs no note")
+        self.assertIn("WRONG bitbucket-pipelines.yml (CONFLICT), ci/old.yml (UNKNOWN), ci/versioned.yml (CHANGED), "
+                      "ci/uv.sh (CHANGED), ci/direct.sh (CHANGED), ci/variable.sh (CHANGED), ci/braced.sh (CHANGED) "
+                      "still run(s) devtools/factory/factory.py as a command", text)
+        for name in ("pre-commit", "ci-local.sh", "test_guard.py", "reads.yml", "redirect.sh", "destination.yml"):
+            self.assertNotIn(name, text)
+
+    def test_the_templates_own_pipeline_kept_by_a_project_gets_no_note(self):
+        # A project that kept the template's 1.5 pipeline (CHANGED) runs the destination's old factory.py only on
+        # a branch older than v1.4.0, deliberately: not a caller still on the old name.
+        pipeline = (book.TEMPLATE_DIR / "packs/bitbucket/bitbucket-pipelines.yml").read_text(encoding="utf-8")
+        self.assertIn("/tmp/destination/devtools/factory/factory.py ai-files", pipeline)
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder)
+            (target / "bitbucket-pipelines.yml").write_text(pipeline, encoding="utf-8")
+            self.assertEqual(book.old_command_notes(target, [(book.CHANGED, "bitbucket-pipelines.yml")]), [])
+            (target / "bitbucket-pipelines.yml").write_text(
+                pipeline + "          - python3 devtools/factory/factory.py ai-files\n", encoding="utf-8")
+            self.assertEqual(len(book.old_command_notes(target, [(book.CHANGED, "bitbucket-pipelines.yml")])), 1,
+                             "the project's own factory.py run as a command is still named")
+
+
+class LongLivedNotes(unittest.TestCase):
+    """A protected branch still on a Book from before v1.4.0 keeps its own old check: named, for information."""
+
+    def test_a_protected_branch_before_v140_is_named_and_one_on_14_or_with_no_tools_is_not(self):
+        with tempfile.TemporaryDirectory() as folder:
+            repo = Path(folder)
+            git(repo, "init", "-q", "-b", "dev")
+            git(repo, "config", "user.email", "t@example.invalid")
+            git(repo, "config", "user.name", "t")
+            (repo / "README.md").write_text("x\n", encoding="utf-8")
+            git(repo, "add", "-A")
+            git(repo, "commit", "-qm", "no tools")
+            git(repo, "branch", "main")  # no AI tools at all: the pull request judges itself, as before
+            (repo / "devtools/factory").mkdir(parents=True)
+            (repo / "devtools/factory/factory.py").write_text("old\n", encoding="utf-8")
+            git(repo, "add", "-A")
+            git(repo, "commit", "-qm", "a 1.3 Book")
+            git(repo, "branch", "qa")
+            (repo / "devtools/book.py").write_text("new\n", encoding="utf-8")
+            git(repo, "add", "-A")
+            git(repo, "commit", "-qm", "a 1.4 Book")
+            config = {"protected_branches": ["dev", "qa", "uat", "main"], "book": {"packs": ["bitbucket"]}}
+            notes = book.long_lived_notes(repo, config, book.real_runner)
+            self.assertEqual(book.long_lived_notes(repo, {**config, "book": {"packs": []}}, book.real_runner), [],
+                             "no bitbucket pack, no pipeline to fail")
+        self.assertEqual(len(notes), 2, notes)
+        self.assertTrue(notes[0].startswith("qa hold(s) a Book from before v1.4.0"), notes[0])
+        self.assertIn("for information", notes[0])
+        self.assertIn("nothing to promote before this upgrade", notes[0])
+        self.assertTrue(notes[1].startswith("no local or origin ref for uat"), notes[1])
+        for note in notes:  # information, never a stop: promoting early would release unfinished work
+            self.assertFalse(note.startswith((book.WRONG, book.CONFIRM)), note)
+
+
 UNVERSIONED_CONTRACTS = ("# API contracts\n\n## Unversioned routes\n\n| Method | Path | Notes | Source |\n"
                          "|---|---|---|---|\n| GET | `/health/live` | probe | `src/A.cs` |\n"
                          "| GET | `/` | redirect | `src/A.cs` |\n\n## Table of contents\n")
 
 
 class MustMergeNotes(unittest.TestCase):
-    """v1.4.0's devtools/book.py needs the new factory.py and guard.py: a kept older copy is merged first."""
+    """devtools/book.py (from v1.4.0) needs the new factory.py and guard.py: a kept older copy is merged first."""
 
     def test_a_new_book_entry_over_a_kept_factory_or_guard_must_merge_them(self):
         rows = [(book.NEW, "devtools/book.py"), (book.CONFLICT, "devtools/factory/factory.py"),
@@ -1005,16 +1134,16 @@ class MustMergeNotes(unittest.TestCase):
                                                     (guard_status, "devtools/factory/hooks/guard.py")]))
         both = note(book.CONFLICT, book.CONFLICT)
         self.assertIn("merge these before using book", both)
-        self.assertIn("runs as the old `factory`", both)
+        self.assertIn("`book` refuses to run", both)
         self.assertIn("the guard judges a deploy only under the name factory.py", both)
         factory_only = note(book.CONFLICT, book.CURRENT)
         self.assertIn("merge it before using book", factory_only)
-        self.assertIn("runs as the old `factory`", factory_only)
+        self.assertIn("`book` refuses to run", factory_only)
         self.assertNotIn("guard", factory_only)
         guard_only = note(book.CURRENT, book.CONFLICT)
         self.assertIn("merge it before using book", guard_only)
         self.assertIn("the guard judges a deploy only under the name factory.py", guard_only)
-        self.assertNotIn("runs as the old", guard_only)
+        self.assertNotIn("refuses to run", guard_only)
 
     def test_nothing_to_merge_is_no_note(self):
         self.assertEqual(book.must_merge_notes([(book.NEW, "devtools/book.py"),
@@ -1093,7 +1222,7 @@ class FeGuidesNotes(unittest.TestCase):
 
 class Upgrade(unittest.TestCase):
     """
-    `factory book upgrade`: a project installed at template 1.0.0, edited in one template file, upgraded to
+    `book upgrade`: a project installed at template 1.0.0, edited in one template file, upgraded to
     1.1.0. A template repository of its own, tagged at each version, stands in for the boilerplate.
     """
 
@@ -1401,7 +1530,7 @@ class TheRealTemplate(unittest.TestCase):
                 self.assertEqual((target / "src/Acme.API/CLAUDE.md").is_file(), stack == "dotnet")
                 self.assertEqual((target / "docs/fe-integration-guides/api-conventions.md").is_file(),
                                  "fe-guides" in packs)
-                self.assertEqual((target / ".claude/skills/deploy/SKILL.md").is_file(), "deploy" in packs)
+                self.assertFalse((target / ".claude/skills").exists(), "from v1.5 the template owns no skill, nor stub")
                 config = (target / "devtools/factory/factory.toml").read_text(encoding="utf-8")
                 self.assertIn('id = "data-script-ddl"', config, "every stack keeps the core rule")
                 self.assertEqual('id = "anonymous-route"' in config, stack == "dotnet")

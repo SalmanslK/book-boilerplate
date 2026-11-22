@@ -1,5 +1,5 @@
 """
-Self-tests for deploy.py, `factory deploy`. Nothing here reaches a server or git: every command goes
+Self-tests for deploy.py, `book deploy`. Nothing here reaches a server or git: every command goes
 to a fake that answers from a script, so the tests prove what each step concludes from what it is told.
 
     python3 -m unittest discover -s devtools/factory -p "test_*.py" -v
@@ -879,7 +879,7 @@ class StatusTests(Base):
         self.assertIn("QA — COULD NOT READ LIVE (exit 255: ssh: connect to host port 22: Connection timed out)", text)
         self.assertIn("NOT a live read", text)
         self.assertIn(f"Commit:       {SHA_NEW[:12]}", text)
-        self.assertIn(f"Deployed:     {STAMP} (recorded by `factory deploy report`)", text)
+        self.assertIn(f"Deployed:     {STAMP} (recorded by `book deploy report`)", text)
         self.assertIn("2 commits behind origin/dev", text)
         self.assertNotIn(SHA_OLD[:12], text)
 
