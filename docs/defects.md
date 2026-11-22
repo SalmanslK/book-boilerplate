@@ -70,3 +70,4 @@ One line per fixed defect: id, what it was, and the commit or release that fixed
 - **D37** — the ai-files owner tests edited the first `owners` list in `factory.toml`, which is the `[fe_guides]` list once that section has one. Fixed in v1.3.4.
 - **D38** — `/check-guides` asked a guide to name any dotted string assigned to a name, such as an application's name, as an error code. Fixed in v1.3.4.
 - **D39** — the book plugin was not pinned to a release, so each plugin release reached projects unreviewed, and no check tied the plugin's version to the template's. Fixed in v1.3.4.
+- **D40** — the copied `ShippedTextTests` failed a project on its own defect ids in template-owned files it keeps changed. Fixed in v1.4.1.

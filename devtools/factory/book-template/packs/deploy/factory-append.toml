@@ -31,7 +31,9 @@ smoke_skip_reasons = { "No deployed API" = "URL not set", "No account to log in 
 # smoke_pairs = [{ name = "reviewer", email = "{{env_prefix}}..._EMAIL", password = "{{env_prefix}}..._PASSWORD", reason = "No reviewer account", required_on = ["QA"] }]
 smoke_pairs = []
 # /book:deploy: the project's deployment plan (the platform, and why each check exists), and where the Book
-# records its last audit, which a QA deploy names. Empty: none yet, and the skill says so.
+# records its last audit, which a QA deploy names. Empty: none yet, and the skill says so. Point the runbook
+# at the plan's section on the environments past DEV and QA (a path with its #anchor): when /book:deploy
+# refuses one, it names that section as the way there, and it reads no [deploy.notes] entry before refusing.
 runbook = ""
 audit_record = ""
 

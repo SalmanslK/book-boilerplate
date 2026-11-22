@@ -1,16 +1,16 @@
 # Book v1.5 — Retiring the old names
 
-**Status:** `Not started` · **Owner:** Boilerplate owner · **FSD:** — · **Checked against:** — · **FE guide:** — · **Depends on:** Book v1.0.0
+**Status:** `In progress` · **Owner:** Boilerplate owner · **FSD:** — · **Checked against:** — · **FE guide:** — · **Depends on:** Book v1.0.0
 
 v1.4.0 named the Book's command `book` (`python devtools/book.py <command>`) and kept `factory`
 (`python devtools/factory/factory.py`) as an alias, and it kept a rename stub under every old skill name. v1.5
 removes the alias and the stubs. Its row is in [`../project.md`](../project.md#part-1--features-and-phasing).
 
-## 1. Releasing v1.4.0 first
+## 1. Releasing the plugin first
 
-Template v1.4.0's `.claude/settings.json` pins the book plugin at `ref = "v0.5.0"` and its `plugin_min` is
-0.5.0. **Push the plugin's `v0.5.0` tag before the boilerplate's `v1.4.0`**: a Book upgraded to 1.4.0
-before the tag exists pins a release the marketplace cannot fetch.
+A template release pins the book plugin it needs: template v1.4.1's `.claude/settings.json` has
+`ref = "v0.5.1"`, and its `plugin_min` is 0.5.1. **Push the plugin's tag before the boilerplate's**
+(`v0.5.1`, then `v1.4.1`): a Book upgraded before the tag exists pins a release the marketplace cannot fetch.
 
 ## 2. What still calls `factory`, and must switch when the alias goes
 
@@ -48,6 +48,6 @@ Each was left on the old name on purpose in v1.4.0, because a project on an olde
 
 | # | Task | FSD | Role | Status | Jira | PR | Merged |
 |---|---|---|---|---|---|---|---|
-| 1 | Push plugin tag v0.5.0, then release boilerplate v1.4.0 | — | BE | Not started | — | — | — |
+| 1 | Push plugin tag v0.5.0, then release boilerplate v1.4.0 | — | BE | Built | — | — | 2026-11-22 |
 | 2 | Switch every §2 caller to `book` | — | BE | Not started | — | — | — |
 | 3 | Remove the alias and the rename stubs (§3) | — | BE | Not started | — | — | — |

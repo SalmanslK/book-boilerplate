@@ -2246,19 +2246,101 @@ class ShippedTextTests(unittest.TestCase):
         patterns = [p for pattern in manifest["copy"]["book"] for p in (pattern, pattern.replace("**/", ""))]
         return [rel for rel in tracked if rel and any(fnmatch.fnmatch(rel, pattern) for pattern in patterns)]
 
-    def test_a_shipped_file_cites_the_books_own_defects_as_book_ids(self):
-        root = HERE.parents[1]
-        files = self.shipped()
-        self.assertIn("devtools/factory/book.py", files)
-        self.assertIn("devtools/factory/book-template/manifest.toml", files)
-        bare = []
+    # A project keeps its own changes to some template-owned files, and their comments cite its own defects as
+    # a bare D<n>: there, a bare id its ledger (or the ledger's archive) defines is its own. Not under
+    # book-template/, which goes on to other projects, and not in the template's source repository, which is no
+    # project: there every bare id in a shipped file is refused (Book D40).
+    TEMPLATE_DIR = "devtools/factory/book-template/"
+    LEDGERS = ("docs/defects.md", "docs/archive/defects-closed.md")
+    LEDGER_ID = re.compile(r"^\|\s*(?:\*\*)?(D\d+)(?:\*\*)?\s*\||^- \*\*(D\d+)\*\*", re.M)
+
+    @classmethod
+    def ledger_ids(cls, root: Path) -> set[str]:
+        found: set[str] = set()
+        for rel in cls.LEDGERS:
+            path = root / rel
+            if path.is_file():
+                found |= {row or entry for row, entry in cls.LEDGER_ID.findall(path.read_text(encoding="utf-8"))}
+        return found
+
+    @staticmethod
+    def is_template_source(root: Path) -> bool:
+        """`[book] name` is the manifest's `[source] name`, as test_book's own check reads it."""
+        import tomllib
+        config = tomllib.loads((root / "devtools/factory/factory.toml").read_text(encoding="utf-8"))
+        manifest = tomllib.loads((HERE / "book-template" / "manifest.toml").read_text(encoding="utf-8"))
+        return (config.get("book") or {}).get("name") == manifest["source"]["name"]
+
+    @classmethod
+    def own_ids(cls, root: Path) -> set[str]:
+        """The bare ids a shipped file may cite here: none in the template's source, the ledger's in a project."""
+        return set() if cls.is_template_source(root) else cls.ledger_ids(root)
+
+    def unknown(self, cited: list[str], ours: set[str]) -> list[str]:
+        """The cited lines that name a bare id outside ours."""
+        return [line for line in cited if set(self.ID.findall(self.QUOTED.sub("", line.split(": ", 1)[1]))) - ours]
+
+    def bare(self, root: Path, files: list[str]) -> list[str]:
+        """The lines of these files that cite a bare id this root may not: every one under book-template/."""
+        ours, found = self.own_ids(root), []
         for rel in files:
             try:
                 text = (root / rel).read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue  # a binary file cites nothing
-            bare += self.cited(rel, text)
-        self.assertEqual(bare, [], "write `Book D<n>`: a project's own D<n> is another defect")
+            found += self.unknown(self.cited(rel, text), set() if rel.startswith(self.TEMPLATE_DIR) else ours)
+        return found
+
+    def test_a_shipped_file_cites_the_books_own_defects_as_book_ids(self):
+        files = self.shipped()
+        self.assertIn("devtools/factory/book.py", files)
+        self.assertIn("devtools/factory/book-template/manifest.toml", files)
+        self.assertEqual(self.bare(HERE.parents[1], files), [],
+                         "write `Book D<n>`: a bare D<n> the project's own ledger does not define is another defect")
+
+    def test_in_a_project_its_own_ids_pass_outside_the_template_folder_and_never_inside_it(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            files = {"docs/defects.md": "| D30 | 🟡 |\n| D39 | 🟠 |\n",
+                     "devtools/factory/factory.toml": '[book]\nname = "Acme"\n',
+                     "devtools/factory/factory.py": "# our fix (D30)\n# a guess (D99)\n",
+                     "devtools/factory/book-template/packs/x/devtools/checks/check.py": "# the pin (D39)\n",
+                     "devtools/factory/book-template/manifest.toml": "version = 1  # (Book D39)\n"}
+            for rel, text in files.items():
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text(text, encoding="utf-8")
+            found = self.bare(root, [rel for rel in files if not rel.startswith("docs/")])
+            self.assertEqual([line.split(": ", 1)[0] for line in found],
+                             ["devtools/factory/factory.py:2", "devtools/factory/book-template/packs/x/devtools/checks/check.py:1"])
+
+    def test_in_a_project_a_bare_id_its_ledger_defines_passes_and_an_unknown_one_is_refused(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "docs/archive").mkdir(parents=True)
+            (root / "devtools/factory").mkdir(parents=True)
+            (root / "docs/defects.md").write_text("| Id | Sev |\n|---|---|\n| D12 | 🟡 |\n\n- **D7** — fixed.\n",
+                                                  encoding="utf-8")
+            (root / "docs/archive/defects-closed.md").write_text("| **D3** | 🟠 | Fixed |\n", encoding="utf-8")
+            (root / "devtools/factory/factory.toml").write_text('[book]\nname = "Acme"\n', encoding="utf-8")
+            self.assertFalse(self.is_template_source(root))
+            self.assertEqual(self.own_ids(root), {"D3", "D7", "D12"})
+            cited = self.cited("x.py", "# fixed in our D12\n# and D7, D3\n# a guess (D99)\n# both (D12, D98)\n")
+            self.assertEqual([line.split(":")[1] for line in self.unknown(cited, self.own_ids(root))], ["3", "4"])
+
+    def test_in_the_template_source_every_bare_id_is_refused(self):
+        import tomllib
+        source = tomllib.loads((HERE / "book-template" / "manifest.toml").read_text(encoding="utf-8"))["source"]["name"]
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "docs").mkdir()
+            (root / "devtools/factory").mkdir(parents=True)
+            (root / "docs/defects.md").write_text("| D39 | 🟡 | Fixed |\n", encoding="utf-8")
+            (root / "devtools/factory/factory.toml").write_text(f'[book]\nname = "{source}"\n', encoding="utf-8")
+            self.assertTrue(self.is_template_source(root))
+            self.assertEqual(self.ledger_ids(root), {"D39"})
+            self.assertEqual(self.own_ids(root), set(), "its ledger defines the id, and still it does not pass bare")
+            (root / "devtools/factory/x.py").write_text("# pinned (D39)\n", encoding="utf-8")
+            self.assertEqual(self.bare(root, ["devtools/factory/x.py"]), ["devtools/factory/x.py:1: # pinned (D39)"])
 
     def test_the_rule_reads_comments_and_docstrings_not_fixtures(self):
         source = ('"""Fixed in v1 (D3)."""\nX = "Fix the login (D12)"  # the pin (Book D39)\n# a bare one (D7)\n'

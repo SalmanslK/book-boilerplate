@@ -7,7 +7,7 @@
 # Bump `version` (semver, the same as factory.toml's book_version) with any change here, in
 # skeletons/ or in packs/; a copied Book carries the version it came from.
 
-version = "1.4.0"
+version = "1.4.1"
 
 # The guard hook's matcher must cover every tool it judges (N2).
 guard_matcher = ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Monitor", "Read",
@@ -21,7 +21,7 @@ guard_matcher = ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShe
 plugin = "book@book-plugins"
 # The oldest book plugin release this template's files work with. A Book pins the plugin to a release tag in
 # .claude/settings.json (`ref`); `book verify` refuses an unpinned or older one, and `book upgrade` names it (Book D39).
-plugin_min = "0.5.0"
+plugin_min = "0.5.1"
 skills = []
 
 # P folders: kept in git even when empty (N19), created with a .gitkeep by init.
