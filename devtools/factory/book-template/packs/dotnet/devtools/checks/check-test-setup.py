@@ -38,6 +38,12 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+# The settings: factory.toml merged over the Book's defaults (devtools/factory/book_config.py).
+_FACTORY = next((p / "devtools" / "factory" for p in Path(__file__).resolve().parents
+                 if (p / "devtools" / "factory" / "book_config.py").is_file()), None)
+if _FACTORY is not None:
+    sys.path.insert(0, str(_FACTORY))
+import book_config  # noqa: E402
 
 try:
     import tomllib
@@ -64,8 +70,7 @@ def tests_folder(root: Path) -> str:
     path = root / CONFIG
     if tomllib is None or not path.is_file():
         return TESTS
-    with open(path, "rb") as handle:
-        folder = str((tomllib.load(handle).get("commands") or {}).get("integration_project") or "").strip("/")
+    folder = str((book_config.load(root).get("commands") or {}).get("integration_project") or "").strip("/")
     return folder or TESTS
 
 
@@ -196,4 +201,8 @@ def main(argv: list[str], root: Path = ROOT) -> int:
 
 
 if __name__ == "__main__":
+    # UTF-8 out, so an em dash prints on a Windows console's code page too (Book D45).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     sys.exit(main(sys.argv))

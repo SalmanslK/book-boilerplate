@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import re
 import shutil
@@ -86,8 +87,37 @@ class ImpactTests(unittest.TestCase):
         report = factory.impact(REAL_ROOT, CONFIG, "HEAD", paths)
         self.assertEqual(report["cross_cutting"], paths[:2])
 
+    def test_paths_that_reach_nothing_are_counted_not_called_nothing_changed(self):
+        # Book D42: docs-only paths printed "Nothing changed against the base yet", as if none were given.
+        text = factory.render_impact(factory.impact(REAL_ROOT, CONFIG, "HEAD", ["docs/defects.md", "README.md"]))
+        self.assertIn("2 paths; none reaches a module, a cross-cutting path or a generated doc", text)
+        self.assertNotIn("Nothing changed", text)
+        one = factory.render_impact(factory.impact(REAL_ROOT, CONFIG, "HEAD", ["docs/defects.md"]))
+        self.assertIn("1 path; none reaches", one)
+
+    def test_no_paths_at_all_still_asks_for_them(self):
+        text = factory.render_impact(factory.impact(REAL_ROOT, CONFIG, "HEAD", []))
+        self.assertIn("Nothing changed against the base yet", text)
+        self.assertIn("book impact <paths", text)
+
+    def test_a_modules_guide_and_plan_print_repository_relative(self):
+        # Book D43: the links printed as ../../../docs/... in the terminal, a path relative to a skill's folder.
+        text = factory.render_impact(factory.impact(REAL_ROOT, CONFIG, "HEAD", [
+            "src/App.Application/Features/Companies/CompanyFactory.cs"]))
+        self.assertIn("guide `docs/fe-integration-guides/companies-and-locations.md`", text)
+        self.assertIn("plan `docs/plans/companies-and-memberships.md`", text)
+        self.assertNotIn("../", text)
+
     def ci(self, *paths):
         return factory.ci_tier(REAL_ROOT, CONFIG, "HEAD", list(paths))
+
+    def test_the_book_steps_help_names_the_command_once(self):
+        # Book D50: `book upgrade --help` printed `usage: book book ...`.
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+            factory.parser("book").parse_args(["book", "upgrade", "--help"])
+        self.assertTrue(out.getvalue().startswith("usage: book ["), out.getvalue()[:80])
+        self.assertNotIn("book book", out.getvalue())
 
     def test_docs_and_devtools_are_the_checks_tier(self):
         result = self.ci("docs/defects.md", "devtools/checks/check-book.py", "README.md")
@@ -264,7 +294,7 @@ class PrivateSettingsTests(unittest.TestCase):
 class ConfigValueTests(unittest.TestCase):
     """`book config <table.key>`: one value from factory.toml, never from the private settings."""
 
-    def run_config(self, key: str, private_text: str | None = None) -> tuple[int, str, str]:
+    def run_config(self, key: str, private_text: str | None = None, *flags: str) -> tuple[int, str, str]:
         with tempfile.TemporaryDirectory() as folder:
             private = Path(folder) / "local.toml"
             if private_text is not None:
@@ -273,7 +303,7 @@ class ConfigValueTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"APP_LOCAL_SETTINGS": str(private)}), \
                     mock.patch.object(factory, "repo_root", return_value=FIXTURE_ROOT), \
                     contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                code = factory.main(["config", key])
+                code = factory.main(["config", key, *flags])
         return code, out.getvalue(), err.getvalue()
 
     def test_the_drive_folder_id_comes_from_factory_toml(self):
@@ -296,6 +326,35 @@ class ConfigValueTests(unittest.TestCase):
         self.assertEqual(self.run_config("fe_guides.no_such_key")[0], 1)
         self.assertEqual(self.run_config("fe_guides")[0], 1)
         self.assertEqual(self.run_config("protected_branches")[0], 1)
+
+    def test_json_prints_a_list_or_a_table(self):
+        code, out, _ = self.run_config("protected_branches", None, "--json")
+        self.assertEqual((code, json.loads(out)), (0, CONFIG.raw["protected_branches"]))
+        code, out, _ = self.run_config("fe_guides", None, "--json")
+        self.assertEqual(json.loads(out)["drive_folder_id"], CONFIG.raw["fe_guides"]["drive_folder_id"])
+
+    def test_json_with_no_key_prints_the_whole_merged_view(self):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(factory, "repo_root", return_value=FIXTURE_ROOT),                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(factory.main(["config", "--json"]), 0)
+            self.assertEqual(factory.main(["config"]), 1, "with no key and no --json, refused")
+        whole = json.loads(out.getvalue())
+        self.assertEqual(whole["protected_branches"], CONFIG.raw["protected_branches"])
+        self.assertEqual(whole["fe_guides"]["drive_folder_id"], CONFIG.raw["fe_guides"]["drive_folder_id"])
+        self.assertIn("--json", err.getvalue())
+
+    def test_a_value_the_project_leaves_to_the_defaults_comes_from_them(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "devtools/factory").mkdir(parents=True)
+            (root / "devtools/factory/factory.toml").write_text('[book]\nname = "Acme"\n', encoding="utf-8")
+            (root / "devtools/factory/book-defaults.toml").write_text(
+                '[book]\nrecommendation_heading = "**R:**"\nname = "never"\n', encoding="utf-8")
+            out = io.StringIO()
+            with mock.patch.object(factory, "repo_root", return_value=root), contextlib.redirect_stdout(out):
+                self.assertEqual(factory.main(["config", "book.recommendation_heading"]), 0)
+                self.assertEqual(factory.main(["config", "book.name"]), 0)
+        self.assertEqual(out.getvalue().split(), ["**R:**", "Acme"])
 
 
 class SettingsCheckTests(unittest.TestCase):
@@ -1383,6 +1442,15 @@ class RepositoryTests(unittest.TestCase):
         code, out = self.factory("impact")
         self.assertEqual(code, 0, out)
         self.assertIn("Geography", out)
+        # A branch whose change reaches nothing says how many paths it read, not that nothing changed.
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs" / "notes.md").write_text("notes\n", encoding="utf-8")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", "Add notes")
+        code, out = self.factory("impact", "docs/notes.md")
+        self.assertEqual(code, 0, out)
+        self.assertIn("1 path; none reaches a module", out)
+        self.assertNotIn("Nothing changed", out)
 
     # ---- the branch rules and a PR's description, read back through the command
 

@@ -2,7 +2,7 @@
 """
 Check the book — the documents we maintain — against its own rules.
 
-The rules are in CLAUDE.md ("Where knowledge lives") and docs/CLAUDE.md. Six of them a
+The rules are in CLAUDE.md ("Where knowledge lives") and docs/CLAUDE.md, and the Book's rules files they import. Ten of them a
 program can hold, so this one does, and fails the build when one breaks:
 
 1. Every link resolves. A relative link in a live document points at a file that exists, and
@@ -14,25 +14,39 @@ program can hold, so this one does, and fails the build when one breaks:
 3. History stays in the archive. No live document carries a re-trace log, a changelog or a
    struck-through statement — docs/CLAUDE.md's "current state, not history". Each live document
    that keeps a dated log has an archive file for it instead.
-4. A defect says who found it in the shared words. A row in defects.md or its archive found on or
-   after FOUND_BY_FROM starts its *Found by* with one of FOUND_BY_WORDS (docs/CLAUDE.md, Defects).
+4. The rules are read as Claude Code reads them: CLAUDE.md with its `@path` imports in place, so the
+   Book's owner table (.claude/book/rules.md) and the project's own count as one.
 5. An id is defined once. No D id heads two rows of defects.md (Open, or a Won't fix section) or of
    its archive, or two Fixed entries, and no open or won't-fix defect is also fixed, nor an open one
    archived; no Q id heads two sections or Still open summary rows of open-questions.md, or two
    sections of its archive (`##` or `####`), and no Still open question is also archived
    (docs/CLAUDE.md, Ids). A closed id's one-line entry beside its archived full row is not a repeat.
 6. The defect ledger keeps its shape. An open row's Status is Open, Mitigated, Partial or Blocked — <who>,
-   and it says when it was found; every row found on or after `[book] class_enforced_from` carries
-   *Class: <class> · found <date>* with a class docs/CLAUDE.md's Defects table lists. Rows found before
-   that date keep the label they were written with: a closed row is never rewritten.
+   and it says when it was found; an Open, Mitigated or Partial row carries a Type and a Source
+   (`<source>: <reference>`) from .claude/book/docs.md's lists. A value off a list fails; a missing one fails
+   for a row found on or after `[book] type_source_from` and is warned of before it, as is a ledger without
+   the columns. The archive's rows and the Fixed entries are never judged: a closed row is never rewritten.
+7. An open question is headed the project's way. Its recommendation starts with `[book]
+   recommendation_heading` (default **Recommendation:**); one headed with the default where the project set
+   another fails, and one with no heading is warned of, so a question from before the rule never blocks.
+8. A question's State is one of the four, with the fields it needs (POSTED a Posted date, THREAD ONLY an
+   Answered line, RESOLVED the In FSD text), in the section it belongs to; a RESOLVED one is in the archive.
+   A live question with no State line is warned of.
+9. The Book's files are the Book's. Each file devtools/factory/book-files.lock records (written by `book
+   init` and `book upgrade --apply`) still has the content the Book wrote; one that differs fails, naming
+   where the change belongs, unless `[book] drift_accepted` holds it with a reason (a warning).
+10. The requirements register (docs/requirements/<module>.md) keeps its shape: its tables' columns, a status
+   from the list, every id once (starting with `[requirements] id_prefix` where one is set), a CONTRADICTED row
+   naming its defect, a DEFERRED one its reason, a VERIFIED one a test. A register converted from an old audit
+   only warns of what the audit lacked (a test, a defect, a unique id); a REVERIFY row is warned of.
 
 It also reports — without failing — the documents over the size the audit flagged, so growth is
 seen before it hurts. A passing check is not proof the book is well organised; it proves only
-these six things.
+these ten things.
 
 Not checked, on purpose: docs/archive/ (written once, never maintained), requirements/ (the
 client's documents) and devtools/factory/book-template/ (the template's files, live only once
-`book init` copies them into a Book) — except that rules 4 and 5 read the two archived ledgers.
+`book init` copies them into a Book) — except that rule 5 reads the two archived ledgers.
 
 Usage (from the repository root):
     python3 devtools/checks/check-book.py      # exit 1 when a rule is broken
@@ -46,6 +60,13 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+# The settings: factory.toml merged over the Book's defaults (devtools/factory/book_config.py).
+_FACTORY = next((p / "devtools" / "factory" for p in Path(__file__).resolve().parents
+                 if (p / "devtools" / "factory" / "book_config.py").is_file()), None)
+if _FACTORY is not None:
+    sys.path.insert(0, str(_FACTORY))
+import book_config  # noqa: E402
+import requirements_register  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 # The template and its packs are not live here: their links resolve once `book init` has copied them.
@@ -68,9 +89,7 @@ STRUCK = re.compile(r"~~[^~\n]+~~")
 def book_setting(key: str, default):
     """One `[book]` value from devtools/factory/factory.toml, or `default` when it is not set."""
     try:
-        import tomllib
-        with open(ROOT / "devtools" / "factory" / "factory.toml", "rb") as handle:
-            value = (tomllib.load(handle).get("book") or {}).get(key)
+        value = (book_config.load(ROOT).get("book") or {}).get(key)
     except (OSError, ImportError, ValueError):
         value = None
     return default if value in (None, "") else value
@@ -81,9 +100,11 @@ SIZE_WARNING = int(book_setting("size_warning", 1500))
 
 
 def tracked_markdown(root: Path = ROOT) -> list[str]:
+    """The tracked live documents still in the working tree: one deleted there is not read (a Book file's absence
+    is the drift check's to name, a link to it the link check's)."""
     out = subprocess.run(["git", "ls-files", "*.md"], cwd=root, capture_output=True, text=True,
                          encoding="utf-8", check=True).stdout
-    return [path for path in out.splitlines() if path and not path.startswith(NOT_LIVE)]
+    return [path for path in out.splitlines() if path and not path.startswith(NOT_LIVE) and (root / path).is_file()]
 
 
 def unfenced_lines(text: str):
@@ -117,7 +138,11 @@ def anchors(path: Path) -> set[str]:
         found: set[str] = set()
         seen: dict[str, int] = {}
         # A heading's code spans are part of its anchor: "`factory/` — the AI tools" → factory--the-ai-tools.
-        for _, line in unfenced_lines(path.read_text(encoding="utf-8", errors="replace")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if path.name == "CLAUDE.md":
+            # Read as Claude Code reads it: a heading the file imports from the Book's rules is one of its own.
+            text = book_config.expanded(path.parent, path.name) or text
+        for _, line in unfenced_lines(text):
             match = HEADING.match(line)
             if match:
                 base = slug(match.group(2))
@@ -147,12 +172,13 @@ def link_problems(files: list[str], root: Path = ROOT) -> list[str]:
 
 
 def owned_patterns(root: Path = ROOT) -> list[re.Pattern]:
-    """The paths CLAUDE.md's owner table names: a file, a folder (`…/`), or a pattern (`<n>`)."""
-    path = root / "CLAUDE.md"
-    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    """The paths CLAUDE.md's owner tables name: a file, a folder (`…/`), or a pattern (`<n>`). CLAUDE.md is
+    read as Claude Code reads it, its imports in place: the Book's table is in `.claude/book/rules.md`, and
+    each "Where knowledge lives" section after it (the project's own documents) adds its rows."""
+    text = book_config.expanded(root, "CLAUDE.md") or ""
     if "## Where knowledge lives" not in text:
         return []  # owner_problems reports the missing table; a brownfield CLAUDE.md has none yet
-    table = text.split("## Where knowledge lives", 1)[1].split("\n## ", 1)[0]
+    table = "\n".join(part.split("\n## ", 1)[0] for part in text.split("## Where knowledge lives")[1:])
     patterns = []
     for line in table.splitlines():
         if not line.startswith("|"):
@@ -180,12 +206,18 @@ def owner_problems(files: list[str], root: Path = ROOT) -> list[str]:
     return problems
 
 
-def history_problems(files: list[str], root: Path = ROOT) -> list[str]:
+def history_problems(files: list[str], root: Path = ROOT, converted: bool = False) -> list[str]:
+    """History filed in a live document. A register or appendix converted from an old audit carries the audit's
+    own struck-through history until a person tidies it: `converted=True` reads only those (for a warning),
+    `False` every other document."""
     problems = []
     for rel in files:
         if rel.startswith(HISTORY_EXEMPT):
             continue
-        for number, line in prose_lines((root / rel).read_text(encoding="utf-8", errors="replace")):
+        text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        if (requirements_register.CONVERTED in text and rel.startswith(requirements_register.FOLDER)) != converted:
+            continue
+        for number, line in prose_lines(text):
             if HISTORY_HEADING.match(line):
                 problems.append(f"{rel}:{number}: a history heading in a live document — fold what it found into "
                                 "the current text; the log goes to its archive file (docs/CLAUDE.md)")
@@ -195,47 +227,10 @@ def history_problems(files: list[str], root: Path = ROOT) -> list[str]:
     return problems
 
 
-# docs/CLAUDE.md, Defects: *Found by* starts with one of these words, so "who finds our defects" is a
-# count. Rows found before the rule keep their wording, so only a row found on or after it is held to it.
-FOUND_BY_WORDS = ("Review", "PR review", "Spec audit", "Requirements check", "Test", "Guard/CI", "While building",
-                  "QA", "Consumer", "Client", "Requirement change")
-# The adoption date (`[book] found_by_from`): a row found on or after it carries the words.
-FOUND_BY_FROM = str(book_setting("found_by_from", "1970-01-01"))
-FOUND_BY_LEDGERS = ("docs/defects.md", "docs/archive/defects-closed.md")
-FOUND_BY_HEADER = "Found by"
 FOUND_ON = re.compile(r"\bfound (\d{4}-\d{2}-\d{2})\b")
-FOUND_BY_START = re.compile(r"^(?:" + "|".join(sorted(map(re.escape, FOUND_BY_WORDS), key=len, reverse=True))
-                            + r")(?![\w/])")
 
 
-def table_cells(line: str) -> list[str]:
-    return [cell.strip() for cell in line.strip().strip("|").split("|")]
-
-
-def found_by_problems(root: Path = ROOT) -> list[str]:
-    """Each defect row found on or after FOUND_BY_FROM whose Found by does not start with a listed word."""
-    problems = []
-    for rel in FOUND_BY_LEDGERS:
-        path = root / rel
-        if not path.is_file():
-            continue
-        column = None
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            if not line.lstrip().startswith("|"):
-                column = None
-                continue
-            cells = table_cells(line)
-            if FOUND_BY_HEADER in cells:
-                column = cells.index(FOUND_BY_HEADER)
-                continue
-            found = FOUND_ON.search(line)
-            if column is None or column >= len(cells) or not found or found.group(1) < FOUND_BY_FROM:
-                continue
-            found_by = cells[column].replace("*", "").strip()
-            if not FOUND_BY_START.match(found_by):
-                problems.append(f"{rel}:{number}: Found by {found_by!r} does not start with one of "
-                                f"{', '.join(FOUND_BY_WORDS)} (docs/CLAUDE.md, Defects)")
-    return problems
+table_cells = book_config.table_cells  # one splitter for every Book table: `\|` stays in its cell
 
 
 # docs/CLAUDE.md, Ids: an id is never reused, so each D and Q id is defined once. An id is defined where it
@@ -321,76 +316,258 @@ def id_problems(root: Path = ROOT) -> list[str]:
             + also_in(QUESTIONS, "is still open", still_open, QUESTIONS_ARCHIVE, archived_q, "holds it as resolved"))
 
 
-# docs/CLAUDE.md, Defects: an open row's Status is one of these, and every row found on or after the adoption
-# date (`[book] class_enforced_from`) carries *Class: <a listed class> · found <date>*, the class one of the
-# table's in docs/CLAUDE.md. Rows found before it keep their label: a closed row is never rewritten.
+# The Book's rules for documents (.claude/book/docs.md, Defects): an open row's Status is one of these, it says
+# when it was found, and an Open, Mitigated or Partial row carries a Type and a Source from the lists below. The
+# archive's rows and the one-line Fixed entries keep what they say: a closed row is never rewritten.
 STATUSES = re.compile(r"^(?:Open|Mitigated|Partial|Blocked — \S.*)$")
-CLASS_FROM = str(book_setting("class_enforced_from", "1970-01-01"))
-CLASS_MARK = re.compile(r"Class:\s*`?([\w-]+)`?\s*·\s*found (\d{4}-\d{2}-\d{2})")
-CLASS_ROW = re.compile(r"^\|\s*`([a-z][\w-]*)`\s*\|")
-RULES_FILE = "docs/CLAUDE.md"
+CLASSIFIED = ("Open", "Mitigated", "Partial")
+TYPES = ("spec-divergence", "bug", "regression", "test-gap", "security", "data", "config-infra", "tooling-ci")
+SOURCES = ("qa", "fe", "ba-product", "requirement-sync", "code-review", "audit", "tests-ci", "developer")
+SOURCE_VALUE = re.compile(r"^`?([a-z][\w-]*)`?\s*(?::\s*(.*))?$")
+# A row found before `[book] type_source_from` (the day a Book took the columns) with no Type or Source is only
+# warned of, until `book defects classify` proposes them; one found on or after it fails.
+TYPE_SOURCE_FROM = str(book_setting("type_source_from", "1970-01-01"))
+RULES_FILE = ".claude/book/docs.md"
+EMPTY = {"", "—", "-"}
 
 
-def defect_classes(root: Path = ROOT) -> list[str]:
-    """The classes docs/CLAUDE.md's Defects section lists, in its table's order."""
-    path = root / RULES_FILE
-    if not path.is_file():
-        return []
-    text = path.read_text(encoding="utf-8")
-    section = text.split("\n## Defects", 1)[1].split("\n## ", 1)[0] if "\n## Defects" in text else ""
-    return [match.group(1) for line in section.splitlines() if (match := CLASS_ROW.match(line.strip()))]
+def cell(cells: list[str], column: int | None) -> str:
+    return cells[column].replace("*", "").strip() if column is not None and column < len(cells) else ""
 
 
-def ledger_problems(root: Path = ROOT) -> list[str]:
-    """Open rows' Status and found date; the class of every row found on or after CLASS_FROM."""
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", CLASS_FROM):
+def type_source_problems(ident: str, where: str, kind: str, source: str, found: str) -> tuple[list[str], list[str]]:
+    """One classified row's Type and Source: (problems, warnings)."""
+    problems, warnings = [], []
+    kind = kind.strip("`")
+    if kind in EMPTY or source in EMPTY:
+        missing = " and ".join(name for name, value in (("Type", kind), ("Source", source)) if value in EMPTY)
+        text = f"{where}: {ident} has no {missing}"
+        if found and found >= TYPE_SOURCE_FROM:
+            problems.append(f"{text} ({RULES_FILE}, Defects)")
+        else:
+            warnings.append(f"{text} — `book defects classify` proposes one")
+    if kind not in EMPTY and kind not in TYPES:
+        problems.append(f"{where}: {ident}'s Type {kind!r} is not one of {', '.join(TYPES)} ({RULES_FILE}, Defects)")
+    if source not in EMPTY:
+        match = SOURCE_VALUE.match(source)
+        if not match or match.group(1) not in SOURCES:
+            problems.append(f"{where}: {ident}'s Source {source!r} does not start with one of {', '.join(SOURCES)} "
+                            f"({RULES_FILE}, Defects)")
+        elif not (match.group(2) or "").strip():
+            problems.append(f"{where}: {ident}'s Source {source!r} has no reference — `{match.group(1)}: <the PR, "
+                            f"issue, FSD version or row>` ({RULES_FILE}, Defects)")
+    return problems, warnings
+
+
+def ledger_problems(root: Path = ROOT) -> tuple[list[str], list[str]]:
+    """(problems, warnings): each open row's Status, found date, Type and Source."""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", TYPE_SOURCE_FROM):
         # Compared as text, "2026/11/20" sorts after every real date and would exempt every row.
-        return [f"devtools/factory/factory.toml: [book] class_enforced_from is {CLASS_FROM!r}, not a YYYY-MM-DD date "
-                "- the defect classes could not be checked"]
-    classes = defect_classes(root)
-    problems = []
-    for rel in (DEFECTS, DEFECTS_ARCHIVE):
-        path = root / rel
-        if not path.is_file():
+        return [f"devtools/factory/factory.toml: [book] type_source_from is {TYPE_SOURCE_FROM!r}, not a YYYY-MM-DD "
+                "date - the defects' Type and Source could not be checked"], []
+    path = root / DEFECTS
+    if not path.is_file():
+        return [], []
+    problems, warnings = [], []
+    section, columns, old_shape = "", {}, False
+    for number, line in unfenced_lines(path.read_text(encoding="utf-8", errors="replace")):
+        if line.startswith("## "):
+            section, columns = line[3:].strip(), {}
             continue
-        section, status_column = "", None
-        for number, line in unfenced_lines(path.read_text(encoding="utf-8", errors="replace")):
-            if line.startswith("## "):
-                section, status_column = line[3:].strip(), None
-                continue
-            if not line.lstrip().startswith("|"):
-                status_column = None
-                continue
-            cells = table_cells(line)
-            if "Status" in cells:
-                status_column = cells.index("Status")
-                continue
-            row = DEFECT_ROW.match(line)
-            if not row or (rel == DEFECTS and section == DEFECTS_FIXED):
-                continue
-            ident, mark, found = row.group(1), CLASS_MARK.search(line), FOUND_ON.search(line)
-            if rel == DEFECTS and section == DEFECTS_OPEN:
-                status = cells[status_column].replace("*", "").strip() if status_column is not None \
-                    and status_column < len(cells) else ""
-                if not STATUSES.match(status):
-                    problems.append(f"{rel}:{number}: {ident}'s Status {status!r} is not Open, Mitigated, Partial or "
-                                    "Blocked — <Q id or party> (docs/CLAUDE.md, Defects)")
-                if not found:
-                    problems.append(f"{rel}:{number}: {ident} is open but does not say when it was found — end it "
-                                    "with *Class: <class> · found YYYY-MM-DD* (docs/CLAUDE.md, Defects)")
-            date = (mark.group(2) if mark else found.group(1) if found else "")
-            if not date or date < CLASS_FROM:
-                continue
-            if not mark:
-                problems.append(f"{rel}:{number}: {ident}, found {date}, has no *Class: <class> · found <date>* "
-                                "(docs/CLAUDE.md, Defects)")
-            elif not classes:
-                problems.append(f"{rel}:{number}: {ident}'s class could not be checked — {RULES_FILE} has no class "
-                                "table under ## Defects")
-            elif mark.group(1) not in classes:
-                problems.append(f"{rel}:{number}: {ident}'s class {mark.group(1)!r} is not in {RULES_FILE}'s list "
-                                f"({', '.join(classes)}) — use the nearest listed one, or add the class there first")
+        if not line.lstrip().startswith("|"):
+            columns = {}
+            continue
+        cells = table_cells(line)
+        if "Status" in cells:
+            columns = {name: cells.index(name) for name in ("Status", "Type", "Source") if name in cells}
+            continue
+        row = DEFECT_ROW.match(line)
+        if not row or section != DEFECTS_OPEN:
+            continue
+        ident, found, where = row.group(1), FOUND_ON.search(line), f"{DEFECTS}:{number}"
+        status = cell(cells, columns.get("Status"))
+        if not STATUSES.match(status):
+            problems.append(f"{where}: {ident}'s Status {status!r} is not Open, Mitigated, Partial or "
+                            f"Blocked — <Q id or party> ({RULES_FILE}, Defects)")
+        if not found:
+            problems.append(f"{where}: {ident} is open but does not say when it was found — end its Note with "
+                            f"*found YYYY-MM-DD* ({RULES_FILE}, Defects)")
+        if "Type" not in columns or "Source" not in columns:
+            old_shape = True
+            continue
+        if status in CLASSIFIED or cell(cells, columns["Type"]) not in EMPTY:
+            more = type_source_problems(ident, where, cell(cells, columns["Type"]), cell(cells, columns["Source"]),
+                                        found.group(1) if found else "")
+            problems += more[0] if status in CLASSIFIED else [p for p in more[0] if " has no " not in p]
+            warnings += more[1] if status in CLASSIFIED else []
+    if old_shape:
+        warnings.append(f"{DEFECTS}: the Open table has no Type and Source columns — `book defects classify` "
+                        "proposes each open row's, for you to approve")
+    return problems, warnings
+
+
+def defect_counts(root: Path = ROOT) -> tuple[dict[str, int], dict[str, int]]:
+    """The open defects by Type and by Source (its name, without the reference); `—` where a row has none."""
+    path = root / DEFECTS
+    types: dict[str, int] = {}
+    sources: dict[str, int] = {}
+    if not path.is_file():
+        return types, sources
+    section, columns = "", {}
+    for _, line in unfenced_lines(path.read_text(encoding="utf-8", errors="replace")):
+        if line.startswith("## "):
+            section, columns = line[3:].strip(), {}
+            continue
+        if not line.lstrip().startswith("|"):
+            columns = {}
+            continue
+        cells = table_cells(line)
+        if "Status" in cells:
+            columns = {name: cells.index(name) for name in ("Type", "Source") if name in cells}
+            continue
+        if section != DEFECTS_OPEN or not DEFECT_ROW.match(line):
+            continue
+        kind = cell(cells, columns.get("Type")).strip("`") or "—"
+        source = cell(cells, columns.get("Source"))
+        match = SOURCE_VALUE.match(source)
+        name = match.group(1) if match and source not in EMPTY else "—"
+        types[kind] = types.get(kind, 0) + 1
+        sources[name] = sources.get(name, 0) + 1
+    return types, sources
+
+
+# An open question's recommendation starts with the project's own heading, `[book] recommendation_heading`
+# (book verify N10 reads the same key). The template's default written into a project that set another is
+# what a skill following the template literally writes: that fails. No heading at all is only warned of,
+# so a question written before the heading was a rule never blocks a commit (Book D51).
+DEFAULT_RECOMMENDATION = "**Recommendation:**"
+RECOMMENDATION = str(book_setting("recommendation_heading", DEFAULT_RECOMMENDATION) or DEFAULT_RECOMMENDATION)
+QUESTION_BLOCK = re.compile(r"^#{3,4} (Q\d+)\b")
+OPEN_STATUS = re.compile(r"^\*\*(?:Status|State):\*\*\s*`?OPEN\b")
+
+
+def recommendation_problems(root: Path = ROOT, heading: str = "") -> tuple[list[str], list[str]]:
+    """(problems, warnings): each OPEN question in open-questions.md, and the heading its recommendation uses."""
+    heading = heading or RECOMMENDATION
+    path = root / QUESTIONS
+    if not path.is_file():
+        return [], []
+    blocks: list[tuple[str, int, list[str]]] = []
+    for number, line in unfenced_lines(path.read_text(encoding="utf-8", errors="replace")):
+        match = QUESTION_BLOCK.match(line)
+        if match:
+            blocks.append((match.group(1), number, []))
+        elif line.startswith("#"):
+            blocks.append(("", number, []))
+        elif blocks:
+            blocks[-1][2].append(line)
+    problems, warnings = [], []
+    for ident, number, body in blocks:
+        if not ident or not any(OPEN_STATUS.match(line) for line in body):
+            continue
+        if any(line.lstrip().startswith(heading) for line in body):
+            continue
+        if heading != DEFAULT_RECOMMENDATION and any(l.lstrip().startswith(DEFAULT_RECOMMENDATION) for l in body):
+            problems.append(f"{QUESTIONS}:{number}: {ident} is open and its recommendation is headed "
+                            f"{DEFAULT_RECOMMENDATION} - this project's heading is {heading} "
+                            "([book] recommendation_heading in devtools/factory/factory.toml)")
+        else:
+            warnings.append(f"{QUESTIONS}:{number}: {ident} is open with no {heading} line")
+    return problems, warnings
+
+
+# The Book's rules for documents (.claude/book/docs.md, Questions): a question's State, and the fields that
+# State needs, on one line under its heading. A question with no State line (one written before the rule) is
+# only warned of, until /book:check-sources assigns one; the archive's older sections are never judged.
+NOT_POSTED, POSTED, THREAD_ONLY, RESOLVED = "OPEN · NOT POSTED", "OPEN · POSTED", "ANSWERED · THREAD ONLY", "RESOLVED"
+STATES = (NOT_POSTED, POSTED, THREAD_ONLY, RESOLVED)
+STATE_LINE = re.compile(r"^\*\*State:\*\*\s*(.*)$")
+STATE_FIELD = re.compile(r"\*\*([A-Z][\w ]*?):\*\*\s*(.*?)(?=\s*·\s*\*\*[A-Z][\w ]*?:\*\*|$)")
+QUESTIONS_ANSWERED = "Answered, waiting for the FSD text"
+NOT_SET = {"", "—", "-", "not yet"}
+
+
+def state_fields(line: str) -> dict[str, str]:
+    """`**State:** OPEN · POSTED · **Posted:** 2026-11-02, thread · …` → {"State": "OPEN · POSTED", "Posted": …}."""
+    return {name: value.strip().strip("`").strip() for name, value in STATE_FIELD.findall(line.strip())}
+
+
+def question_blocks(path: Path, heading: re.Pattern) -> list[tuple[str, int, str, list[str]]]:
+    """(id, line number, the `## ` section it is in, its body lines) for each question section in a ledger."""
+    blocks, section = [], ""
+    for number, line in unfenced_lines(path.read_text(encoding="utf-8", errors="replace")):
+        match = heading.match(line)
+        if line.startswith("## ") and not match:
+            section = line[3:].strip()
+        if match:
+            blocks.append((match.group(1), number, section, []))
+        elif line.startswith("#"):
+            blocks.append(("", number, section, []))
+        elif blocks:
+            blocks[-1][3].append(line)
+    return [block for block in blocks if block[0]]
+
+
+def question_state(body: list[str]) -> dict[str, str] | None:
+    line = next((line for line in body if STATE_LINE.match(line.strip())), None)
+    return state_fields(line) if line is not None else None
+
+
+def state_problems(ident: str, where: str, fields: dict[str, str], section: str, live: bool) -> list[str]:
+    """One question's State against the rules: its value, the fields it needs, where it lives."""
+    state, rule = fields.get("State", ""), "(.claude/book/docs.md, Questions)"
+    if state not in STATES:
+        return [f"{where}: {ident}'s State {state!r} is not one of {', '.join(STATES)} {rule}"]
+    problems = []
+    needs = {POSTED: ["Posted"], THREAD_ONLY: ["Posted", "Answered"], RESOLVED: ["Answered", "In FSD text"]}
+    for field in needs.get(state, []):
+        if fields.get(field, "") in NOT_SET:
+            problems.append(f"{where}: {ident} is {state} but has no {field} {rule}")
+    if live and state == RESOLVED:
+        problems.append(f"{where}: {ident} is RESOLVED but still in {QUESTIONS} — move its section to "
+                        f"{QUESTIONS_ARCHIVE} and leave one line under *Resolved* {rule}")
+    elif live and state == THREAD_ONLY and section != QUESTIONS_ANSWERED:
+        problems.append(f"{where}: {ident} is {state}, so it belongs under ## {QUESTIONS_ANSWERED} {rule}")
+    elif live and state in (NOT_POSTED, POSTED) and section != QUESTIONS_OPEN:
+        problems.append(f"{where}: {ident} is {state}, so it belongs under ## {QUESTIONS_OPEN} {rule}")
+    elif not live and state != RESOLVED:
+        problems.append(f"{where}: {ident} is archived but its State is {state}, not RESOLVED {rule}")
     return problems
+
+
+def question_state_problems(root: Path = ROOT) -> tuple[list[str], list[str]]:
+    """(problems, warnings): each question's State in the live ledger, and each archived one that has a State."""
+    problems, warnings = [], []
+    live = root / QUESTIONS
+    if live.is_file():
+        for ident, number, section, body in question_blocks(live, QUESTION_BLOCK):
+            if section not in (QUESTIONS_OPEN, QUESTIONS_ANSWERED):
+                continue  # Superseded and Resolved hold no live question
+            fields = question_state(body)
+            if fields is None:
+                warnings.append(f"{QUESTIONS}:{number}: {ident} has no **State:** line — /book:check-sources "
+                                "proposes one")
+            else:
+                problems += state_problems(ident, f"{QUESTIONS}:{number}", fields, section, True)
+    archive = root / QUESTIONS_ARCHIVE
+    if archive.is_file():
+        for ident, number, section, body in question_blocks(archive, QUESTION_ARCHIVED):
+            fields = question_state(body)
+            if fields is not None and "SUPERSEDED" not in fields.get("State", ""):
+                problems += state_problems(ident, f"{QUESTIONS_ARCHIVE}:{number}", fields, section, False)
+    return problems, warnings
+
+
+def question_counts(root: Path = ROOT) -> dict[str, int]:
+    """How many live questions are in each State; those with none are counted as `no State yet`."""
+    counts = {state: 0 for state in (NOT_POSTED, POSTED, THREAD_ONLY)}
+    live = root / QUESTIONS
+    if live.is_file():
+        for _, _, section, body in question_blocks(live, QUESTION_BLOCK):
+            if section in (QUESTIONS_OPEN, QUESTIONS_ANSWERED):
+                state = (question_state(body) or {}).get("State", "no State yet")
+                counts[state] = counts.get(state, 0) + 1
+    return counts
 
 
 def size_warnings(files: list[str], root: Path = ROOT) -> list[str]:
@@ -401,14 +578,38 @@ def size_warnings(files: list[str], root: Path = ROOT) -> list[str]:
 def main(root: Path = ROOT) -> int:
     files = tracked_markdown(root)
     failed = False
+    questions = recommendation_problems(root)
+    ledger = ledger_problems(root)
+    states = question_state_problems(root)
+    try:
+        drift = book_config.drift(root, book_config.load(root))
+    except (OSError, ValueError) as error:
+        drift = ([f"devtools/factory/factory.toml: {error} - the Book's files could not be compared"], [])
+    try:
+        prefix = str((book_config.load(root).get("requirements") or {}).get("id_prefix") or "")
+    except (OSError, ValueError):
+        prefix = ""
+    register = requirements_register.problems(root, prefix)
     for title, problems in (("Links", link_problems(files, root)), ("Owners", owner_problems(files, root)),
-                            ("History", history_problems(files, root)), ("Found by", found_by_problems(root)),
-                            ("Ids", id_problems(root)), ("Ledger", ledger_problems(root))):
+                            ("History", history_problems(files, root)),
+                            ("Ids", id_problems(root)), ("Ledger", ledger[0]),
+                            ("Questions", questions[0] + states[0]), ("Book files", drift[0]),
+                            ("Requirements", register[0])):
         if problems:
             failed = True
             print(f"{title}: {len(problems)} problem(s)")
             for problem in problems:
                 print(f"  {problem}")
+    for warning in questions[1] + states[1]:
+        print(f"Questions (a warning, not a failure): {warning}")
+    for warning in ledger[1]:
+        print(f"Ledger (a warning, not a failure): {warning}")
+    for warning in drift[1]:
+        print(f"Book files (a warning, not a failure): {warning}")
+    for warning in register[1]:
+        print(f"Requirements (a warning, not a failure): {warning}")
+    for warning in history_problems(files, root, converted=True):
+        print(f"History in a converted register (a warning, not a failure): {warning}")
     large = size_warnings(files, root)
     if large:
         print(f"Size (a warning, not a failure): {len(large)} document(s) over {SIZE_WARNING:,} lines")
@@ -419,4 +620,8 @@ def main(root: Path = ROOT) -> int:
 
 
 if __name__ == "__main__":
+    # UTF-8 out, so an em dash prints on a Windows console's code page too (Book D45).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     sys.exit(main())

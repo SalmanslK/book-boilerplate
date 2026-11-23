@@ -21,7 +21,7 @@ use, each holding its own credential. It is not a command of its own from Book v
     book verify [--target <repo>]               whether the Book is set up (read-only): READY or not
     book upgrade --target <repo> [--apply]      drift against a newer template; --apply updates unchanged files
     book settings --check                       each private setting the tooling reads: set or not set, names only
-    book config <table.key>                     one value from factory.toml (never the private settings)
+    book config <table.key> [--json]            one value of the settings, factory.toml over the Book's defaults
 
 A session reaches a service through a tool that holds the credential, never with it (CLAUDE.md,
 Private settings).
@@ -53,6 +53,7 @@ except ModuleNotFoundError:  # Python < 3.11
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bitbucket  # noqa: E402 — beside this file; standard library only
 import book  # noqa: E402 — beside this file; standard library only
+import book_config  # noqa: E402 — beside this file; the settings merged over the Book's defaults
 try:
     import deploy  # noqa: E402 — the deploy pack's, beside this file when the pack is installed
 except ImportError:
@@ -98,9 +99,8 @@ def private_settings_path(raw: dict | None = None) -> Path:
     """
     if raw is None:
         try:
-            with open(repo_root() / CONFIG_RELATIVE, "rb") as handle:
-                raw = tomllib.load(handle) if tomllib else {}
-        except OSError:
+            raw = book_config.load(repo_root()) if tomllib else {}
+        except (OSError, book_config.ConfigError):
             raw = {}
     override = os.environ.get(settings_variable(raw))
     if override:
@@ -117,8 +117,12 @@ PRIVATE_FOREIGN_NAMES = "private_foreign_names"
 def load_config(root: Path) -> Config:
     if tomllib is None:
         raise FactoryError("book needs Python 3.11 or later (tomllib).")
-    with open(root / CONFIG_RELATIVE, "rb") as handle:
-        raw = tomllib.load(handle)
+    if not (root / CONFIG_RELATIVE).is_file():
+        raise FileNotFoundError(root / CONFIG_RELATIVE)
+    try:
+        raw = book_config.load(root)
+    except book_config.ConfigError as error:
+        raise FactoryError(f"The Book's settings are unreadable: {error}.") from None
     private = private_settings_path(raw)
     if private.is_file():
         try:
@@ -682,7 +686,14 @@ def requirements_status(root: Path, config: Config, today: datetime.date) -> str
 
 
 def command_requirements(root: Path, config: Config, args: argparse.Namespace) -> str:
-    """`requirements status`: the index and our snapshots, offline (requirements_status)."""
+    """`requirements status`: the index and our snapshots, offline (requirements_status). `requirements import`:
+    the old audit into the register (requirements_register.py, beside the checks)."""
+    if args.action == "import":
+        checks = str(root / "devtools" / "checks")
+        if checks not in sys.path:
+            sys.path.insert(0, checks)
+        import requirements_register
+        return requirements_register.import_command(root, args.apply, datetime.date.today().isoformat())
     return requirements_status(root, config, datetime.date.today())
 
 
@@ -734,12 +745,13 @@ def impact(root: Path, config: Config, base: str, paths: list[str] | None = None
 
 
 def render_impact(report: dict) -> str:
+    """The impact report for the terminal: every path repository-relative, as the person runs it from the root."""
     lines = []
     if report["modules"]:
         lines.append("**Modules**")
         lines += [f"- {m['name']} — tests `{m['tests']}`"
-                  + (f"; guide [{m['guide'].rsplit('/', 1)[-1]}](../../../{m['guide']})" if m.get("guide") else "")
-                  + (f"; plan [{m['plan'].rsplit('/', 1)[-1]}](../../../{m['plan']})" if m.get("plan") else "")
+                  + (f"; guide `{m['guide']}`" if m.get("guide") else "")
+                  + (f"; plan `{m['plan']}`" if m.get("plan") else "")
                   for m in report["modules"]]
     if report["cross_cutting"]:
         lines.append("\n**Cross-cutting** — no module owns these, so the whole integration suite runs:")
@@ -750,7 +762,12 @@ def render_impact(report: dict) -> str:
     if report["regenerate"]:
         lines.append("\n**Regenerate**")
         lines += [f"- {item}" for item in report["regenerate"]]
-    if not lines:
+    if not lines and report["paths"]:
+        # Paths that reach nothing are not "nothing changed": a docs or tooling change has no module to test.
+        count = len(report["paths"])
+        lines.append(f"{count} path{'s' if count != 1 else ''}; none reaches a module, a cross-cutting path or a "
+                     "generated doc (docs or tooling only).")
+    elif not lines:
         lines.append("Nothing changed against the base yet — name the paths you expect to touch: "
                      "`book impact <paths…>`.")
     return "\n".join(lines)
@@ -1361,14 +1378,15 @@ def ai_files_settings(root: Path, config: Config, destination: str) -> tuple[dic
     Only before the destination has the section at all — the PR that brings it — is the branch's own
     used, and the step says so.
     """
-    code, text = git(root, "show", f"origin/{destination}:{CONFIG_RELATIVE}")
-    if code == 0:
-        try:
-            settings = tomllib.loads(text).get("ai_files") if tomllib else None
-        except ValueError:
-            raise FactoryError(f"origin/{destination}'s factory.toml is not valid TOML.") from None
-        if settings:
-            return settings, ""
+    # The destination's own settings, merged over the defaults as that branch holds them.
+    try:
+        held = book_config.load_at(root, f"origin/{destination}")
+    except book_config.ConfigError:
+        raise FactoryError(f"origin/{destination}'s factory.toml (or a Book defaults file there) is not valid "
+                           "TOML.") from None
+    settings = (held or {}).get("ai_files")
+    if settings and settings.get("owners") is not None:
+        return settings, ""
     return (config.raw.get("ai_files") or {},
             f" (origin/{destination} has no [ai_files] yet, so this branch's own list was used)")
 
@@ -1722,8 +1740,7 @@ def command_settings(root: Path, config: Config | None, args: argparse.Namespace
     """
     if tomllib is None:
         raise FactoryError("book needs Python 3.11 or later (tomllib).")
-    with open(root / CONFIG_RELATIVE, "rb") as handle:
-        committed = tomllib.load(handle)  # the repository's own file: `private_settings` comes from here
+    committed = book_config.load(root)  # the repository's own settings: `private_settings` comes from here
     try:
         presence = private_presence(load_config(root).raw)
         state = presence["file"]
@@ -1745,19 +1762,27 @@ def command_settings(root: Path, config: Config | None, args: argparse.Namespace
 
 def command_config(root: Path, config: Config | None, args: argparse.Namespace) -> str:
     """
-    One value from the repository's own factory.toml, by dotted key — for a script that is not Python
-    (Publish-FeGuidesToDrive.ps1 reads `fe_guides.drive_folder_id`), so the value keeps one owner and
-    no second TOML parser. The private settings are never merged in, so none of them can be printed.
-    A string, number or boolean only; a table or a list is refused.
+    One value of the repository's settings - its factory.toml merged over the Book's defaults - by dotted key,
+    for a script or a skill (Publish-FeGuidesToDrive.ps1 reads `fe_guides.drive_folder_id`), so the value
+    keeps one owner and no second TOML parser. The private settings are never merged in, so none of them can
+    be printed. A string, number or boolean prints as it is; with `--json` any value prints as JSON, a list or
+    a table included. Without `--json` a table or a list is refused. With no key, `--json` prints the whole
+    merged settings; without `--json` a missing key is refused.
     """
     if tomllib is None:
         raise FactoryError("book needs Python 3.11 or later (tomllib).")
-    with open(root / CONFIG_RELATIVE, "rb") as handle:
-        value: object = tomllib.load(handle)
-    for part in args.key.split("."):
-        if not isinstance(value, dict) or part not in value:
-            raise FactoryError(f"{CONFIG_RELATIVE} has no {args.key}.")
-        value = value[part]
+    key = getattr(args, "key", None)
+    if not key and not getattr(args, "json", False):
+        raise FactoryError("Name a key (table.key), or add --json to print the whole merged settings.")
+    try:
+        settings = book_config.load(root)
+        value: object = book_config.value(settings, key) if key else settings
+    except book_config.ConfigError as error:
+        raise FactoryError(f"The Book's settings are unreadable: {error}.") from None
+    except KeyError:
+        raise FactoryError(f"{CONFIG_RELATIVE} and the Book's defaults set no {args.key}.") from None
+    if getattr(args, "json", False):
+        return json.dumps(value, ensure_ascii=False)
     if isinstance(value, bool):
         return "true" if value else "false"
     if not isinstance(value, (str, int, float)):
@@ -1776,8 +1801,7 @@ def command_book(root: Path, config: Config | None, args: argparse.Namespace) ->
         raw = {}
         if tomllib is not None and (root / CONFIG_RELATIVE).is_file():
             try:
-                with open(root / CONFIG_RELATIVE, "rb") as handle:
-                    raw = tomllib.load(handle)
+                raw = book_config.load(root)
             except (OSError, ValueError) as error:
                 raise FactoryError(f"{CONFIG_RELATIVE} is unreadable ({error}); `book verify` cannot check on an "
                                    "empty config.") from None
@@ -1984,7 +2008,10 @@ def parser(prog: str = "book") -> argparse.ArgumentParser:
     page.add_argument("--print", action="store_true", help="also print those pages' text")
     requirements = sub.add_parser("requirements", help="offline: every requirements source, our newest snapshot, "
                                                        "its last check and the weekly capture rule; never fetches")
-    requirements.add_argument("action", choices=["status"])
+    requirements.add_argument("action", choices=["status", "import"],
+                              help="import: the old audit (docs/Audit/spec-traceability.md) into the requirements "
+                                   "register, once; report first")
+    requirements.add_argument("--apply", action="store_true", help="import: write the register")
     sync = sub.add_parser("sync-plan", help="read-only: /book:sync-sources's pinned SHAs, last sync, mode, delta set, "
                                             "QA's deployed commit and the skip rules to confirm")
     sync.add_argument("--mode", choices=SYNC_MODES, default="", help="the mode the person asked for; default: suggested")
@@ -1998,14 +2025,18 @@ def parser(prog: str = "book") -> argparse.ArgumentParser:
                                "section, page or plan in a heading, else a code path or requirement id in a row")
     if deploy is not None:
         deploy.add_parser(sub)
-    book.add_parser(sub)
+    book.add_parser(sub, prog)
     settings = sub.add_parser("settings", help="each private setting the tooling reads, by name: set or not set — "
                                                "never a value")
     settings.add_argument("--check", action="store_true", required=True,
                           help="report each key of the private settings file and each deploy smoke variable")
-    config_parser = sub.add_parser("config", help="print one value from factory.toml, e.g. fe_guides.drive_folder_id "
-                                                  "(the repository's own file; never the private settings)")
-    config_parser.add_argument("key", help="the dotted key: table.key")
+    config_parser = sub.add_parser("config", help="print one value of the settings (factory.toml over the Book's "
+                                                  "defaults), e.g. fe_guides.drive_folder_id, or with --json and no "
+                                                  "key all of them; never the private settings")
+    config_parser.add_argument("key", nargs="?", help="the dotted key: table.key (with --json and no key, the "
+                                                      "whole merged settings)")
+    config_parser.add_argument("--json", action="store_true",
+                               help="print the value as JSON - a list or a table too")
     return top
 
 

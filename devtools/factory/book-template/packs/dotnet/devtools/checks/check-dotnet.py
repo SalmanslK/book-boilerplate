@@ -48,6 +48,12 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+# The settings: factory.toml merged over the Book's defaults (devtools/factory/book_config.py).
+_FACTORY = next((p / "devtools" / "factory" for p in Path(__file__).resolve().parents
+                 if (p / "devtools" / "factory" / "book_config.py").is_file()), None)
+if _FACTORY is not None:
+    sys.path.insert(0, str(_FACTORY))
+import book_config  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 FACTORY_TOML = "devtools/factory/factory.toml"
@@ -519,9 +525,9 @@ def settings(root: Path) -> dict:
     if not path.is_file():
         raise CouldNotCheck(f"no {FACTORY_TOML}")
     try:
-        config = tomllib.loads(path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as error:
-        raise CouldNotCheck(f"{FACTORY_TOML} is not valid TOML ({error})") from error
+        config = book_config.load(root)
+    except book_config.ConfigError as error:
+        raise CouldNotCheck(str(error)) from error
     return config.get("dotnet_checks") or {}
 
 

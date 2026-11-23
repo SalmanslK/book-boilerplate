@@ -42,7 +42,8 @@ Two more shapes, for a rule that is not a plain ban:
     python devtools/checks/check-code-rules.py            # every tracked file
     python devtools/checks/check-code-rules.py --staged   # pre-commit: the lines this commit adds
 
-With --staged the rules come from the staged factory.toml (the working copy when it is not staged), and
+The rules are factory.toml's merged over the Book's defaults (book-defaults.toml and the stack's). With
+--staged they come from the staged copies (the working copy of a file that is not staged), and
 only the lines the commit adds are judged: a file already holding a breach does not block an unrelated
 change to it, and the full run still reports it. An allow-listed file the commit adds a match to is
 counted whole, as staged, and fails when it holds more than its `count`. A factory.toml with no rules
@@ -62,6 +63,12 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+# The settings: factory.toml merged over the Book's defaults (devtools/factory/book_config.py).
+_FACTORY = next((p / "devtools" / "factory" for p in Path(__file__).resolve().parents
+                 if (p / "devtools" / "factory" / "book_config.py").is_file()), None)
+if _FACTORY is not None:
+    sys.path.insert(0, str(_FACTORY))
+import book_config  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 FACTORY_TOML = "devtools/factory/factory.toml"
@@ -181,12 +188,21 @@ def compile_rule(entry: object, where: str, prefix: str) -> CodeRule:
                     tuple(allowed), require, tuple(glob_regex(prefix + g) for g in when))
 
 
-def load_rules(text: str) -> list[CodeRule]:
-    """Every code rule in factory.toml's text, its globs anchored at its stack's root."""
+def defaults_reader(root: Path, staged: bool) -> "book_config.Reader":
+    """Where the Book's defaults files are read: as staged (the working copy where one is not), or the checkout."""
+    if not staged:
+        return book_config.working_reader(root)
+    index, working = book_config.git_reader(root, ":"), book_config.working_reader(root)
+    return lambda rel: index(rel) if index(rel) is not None else working(rel)
+
+
+def load_rules(text: str, read: "book_config.Reader | None" = None) -> list[CodeRule]:
+    """Every code rule in factory.toml's text merged over the Book's defaults `read` finds (none without one),
+    its globs anchored at its stack's root."""
     try:
-        config = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as error:
-        raise CouldNotCheck(f"{FACTORY_TOML} is not valid TOML ({error})") from error
+        config = book_config.load_text(text, read or (lambda rel: None), FACTORY_TOML)
+    except book_config.ConfigError as error:
+        raise CouldNotCheck(str(error)) from error
     found = [compile_rule(entry, "[[code_rules]]", "") for entry in config.get("code_rules", [])]
     for stack in config.get("stacks", []) or []:
         if not isinstance(stack, dict):
@@ -295,7 +311,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
         sys.stderr.reconfigure(encoding="utf-8")
     staged = "--staged" in args
     try:
-        rules = load_rules(config_text(root, staged))
+        rules = load_rules(config_text(root, staged), defaults_reader(root, staged))
         if not rules:
             print(f"{NAME}: no code rules in {FACTORY_TOML}; nothing to judge.")
             return 0

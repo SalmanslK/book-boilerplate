@@ -30,6 +30,12 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+# The settings: factory.toml merged over the Book's defaults (devtools/factory/book_config.py).
+_FACTORY = next((p / "devtools" / "factory" for p in Path(__file__).resolve().parents
+                 if (p / "devtools" / "factory" / "book_config.py").is_file()), None)
+if _FACTORY is not None:
+    sys.path.insert(0, str(_FACTORY))
+import book_config  # noqa: E402
 
 SCISSORS = re.compile(r"^# -+ >8 -+$")
 TOOLS = r"(claude|anthropic|copilot|chatgpt|gpt|openai|cursor|gemini|codex|devin|\bai\b|bot\b|\[bot\])"
@@ -54,12 +60,9 @@ IDENTITY = re.compile(r"<[^<>\s]+@[^<>\s]+>")
 def fix_id_pattern(root: Path | None = None) -> re.Pattern:
     """`[checks] fix_id` (a defect or question id by default) or the `[jira] project` key's issue id."""
     config = {}
-    path = (root or Path(__file__).resolve().parents[2]) / "devtools" / "factory" / "factory.toml"
     try:
-        import tomllib
-        with open(path, "rb") as handle:
-            config = tomllib.load(handle)
-    except (OSError, ImportError, ValueError):
+        config = book_config.load(root or Path(__file__).resolve().parents[2])
+    except (OSError, ValueError):
         config = {}
     ids = str((config.get("checks") or {}).get("fix_id") or r"\b[DQ]\d+\b")
     key = str((config.get("jira") or {}).get("project") or "")
@@ -212,4 +215,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # UTF-8 out, so an em dash prints on a Windows console's code page too (Book D45).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     raise SystemExit(main())

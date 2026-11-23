@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "factory"))
 import factory  # noqa: E402
 
 # `book verify` is the module's `book verify` step: the Book's steps need no second "book".
-BOOK_STEPS = ("verify", "init", "upgrade")
+BOOK_STEPS = ("verify", "init", "upgrade", "defects")
 
 
 def arguments(argv: list[str]) -> list[str]:

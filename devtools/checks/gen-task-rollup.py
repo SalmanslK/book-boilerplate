@@ -51,6 +51,12 @@ import subprocess
 import sys
 from datetime import date, timedelta
 from pathlib import Path
+# The settings: factory.toml merged over the Book's defaults (devtools/factory/book_config.py).
+_FACTORY = next((p / "devtools" / "factory" for p in Path(__file__).resolve().parents
+                 if (p / "devtools" / "factory" / "book_config.py").is_file()), None)
+if _FACTORY is not None:
+    sys.path.insert(0, str(_FACTORY))
+import book_config  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 PLANS = ROOT / "docs" / "plans"
@@ -405,11 +411,42 @@ def pace(merged: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
+# The ledgers' counts (check-book.py reads the ledgers; this writes what it counts). A project.md from before
+# Book 1.6 has no `ledgers` markers: the counts are left out there rather than failing, until they are added.
+OPTIONAL_MARKERS = {"ledgers"}
+
+
+def ledger_counts(root: Path) -> str:
+    """The open questions per State and the open defects by Type and by Source, as one table each."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("check_book", Path(__file__).with_name("check-book.py"))
+    check_book = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(check_book)
+    states = check_book.question_counts(root)
+    types, sources = check_book.defect_counts(root)
+
+    def table(title: str, counts: dict[str, int]) -> list[str]:
+        rows = [f"| {name} | {count} |" for name, count in counts.items() if count]
+        return [f"| {title} | Open |", "|---|---|"] + (rows or ["| *None* | 0 |"])
+    lines = table("Question state", states) + [""] + table("Defect type", dict(sorted(types.items()))) \
+        + [""] + table("Defect source", dict(sorted(sources.items())))
+    sys.path.insert(0, str(Path(__file__).parent))
+    import requirements_register
+    register = requirements_register.counts(root)
+    if register:
+        statuses = [s for s in requirements_register.STATUSES if any(s in c for c in register.values())]
+        lines += ["", "| Requirements | " + " | ".join(statuses) + " |", "|---|" + "---|" * len(statuses)]
+        lines += [f"| {module} | " + " | ".join(str(counts.get(s, 0)) for s in statuses) + " |"
+                  for module, counts in sorted(register.items())]
+    return "\n".join(lines)
+
+
 def splice(text: str, marker: str, table: str, problems: list[str]) -> str:
     begin = next((l for l in text.splitlines() if l.startswith(f"<!-- {marker}:begin")), None)
     end = f"<!-- {marker}:end -->"
     if begin is None or end not in text:
-        problems.append(f"docs/project.md: the {marker} markers are missing")
+        if marker not in OPTIONAL_MARKERS:
+            problems.append(f"docs/project.md: the {marker} markers are missing")
         return text
     head, rest = text.split(begin, 1)
     _, tail = rest.split(end, 1)
@@ -419,9 +456,7 @@ def splice(text: str, marker: str, table: str, problems: list[str]) -> str:
 def configured_base(root: Path) -> str:
     """`base_ref` in devtools/factory/factory.toml (origin/dev when it names none): the branch work merges into."""
     try:
-        import tomllib
-        with open(root / "devtools" / "factory" / "factory.toml", "rb") as handle:
-            return str(tomllib.load(handle).get("base_ref") or "origin/dev")
+        return str(book_config.load(root).get("base_ref") or "origin/dev")
     except (OSError, ImportError, ValueError):
         return "origin/dev"
 
@@ -435,9 +470,7 @@ def configured_roles(root: Path) -> tuple[list[str], str]:
     or a key is missing, `roles` is not a list of non-empty strings, or `our_role` is not one of them.
     """
     try:
-        import tomllib
-        with open(root / "devtools" / "factory" / "factory.toml", "rb") as handle:
-            book = tomllib.load(handle).get("book") or {}
+        book = book_config.load(root).get("book") or {}
         roles, ours = book.get("roles", FALLBACK_ROLES), book.get("our_role", FALLBACK_OURS)
     except (OSError, ImportError, ValueError, AttributeError):
         return list(FALLBACK_ROLES), FALLBACK_OURS
@@ -458,9 +491,7 @@ def configured_enforced(root: Path) -> bool:
     value is missing.
     """
     try:
-        import tomllib
-        with open(root / "devtools" / "factory" / "factory.toml", "rb") as handle:
-            value = (tomllib.load(handle).get("book") or {}).get("derived_status_enforced")
+        value = (book_config.load(root).get("book") or {}).get("derived_status_enforced")
     except (OSError, ImportError, ValueError, AttributeError):
         return DERIVED_STATUS_ENFORCED
     return value if isinstance(value, bool) else DERIVED_STATUS_ENFORCED
@@ -522,6 +553,7 @@ def main(argv: list[str] | None = None, plans: Path = PLANS, project: Path = PRO
             print("gen-task-rollup: warning, not enforced ([book] derived_status_enforced = false): "
                   f"{change.replace(' -> ', ' should be ')}", file=sys.stderr)
         changes, plan_lines, updated = [], {}, text
+    tables["ledgers"] = ledger_counts(project.parent.parent)
     for marker, table in tables.items():
         updated = splice(updated, marker, table, problems)
     for problem in problems:
@@ -548,4 +580,8 @@ def main(argv: list[str] | None = None, plans: Path = PLANS, project: Path = PRO
 
 
 if __name__ == "__main__":
+    # UTF-8 out, so an em dash prints on a Windows console's code page too (Book D45).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     raise SystemExit(main())

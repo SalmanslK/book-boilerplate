@@ -4,8 +4,10 @@
 
 ## How to use it
 
-Every open question carries a recommendation, which is what gets built unless the Answer says otherwise.
-Status is one of `OPEN` · `ANSWERED` · `SUPERSEDED`. An answered question moves to
+Every open question carries a recommendation, which is what gets built unless the Answer says
+otherwise. Each has a **State** on one line under its heading — `OPEN · NOT POSTED`, `OPEN · POSTED`,
+`ANSWERED · THREAD ONLY` or `RESOLVED` — with its fields ([the Book's rules for
+documents](../.claude/book/docs.md#questions)). A RESOLVED question moves to
 [`archive/questions-resolved.md`](archive/questions-resolved.md), leaving one line under *Resolved*.
 
 ### Which document wins
@@ -18,6 +20,14 @@ Status is one of `OPEN` · `ANSWERED` · `SUPERSEDED`. An answered question move
 ## Still open
 
 ### The open questions in full
+
+Each one is a `#### Q<n> · <title>` heading, then `**State:** OPEN · NOT POSTED · **Posted:** — ·
+**Answered:** — · **In FSD text:** not yet · **Thread resolved:** no`, the question in plain words, and its
+recommendation.
+
+## Answered, waiting for the FSD text
+
+The BA has answered in the thread; the FSD text does not say it yet. The code follows the answer.
 
 ## Superseded
 

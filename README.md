@@ -52,10 +52,83 @@ python devtools/book.py upgrade --target my-project --apply    # update what it 
 ```
 
 The report says, for every file the template owns, whether the project's copy is current, behind the
-new template (never changed by the project), changed by the project, or changed by both, with a
-unified diff for each file it would write. `--apply` updates only the files the project never changed,
-lists the rest for a person, and bumps `book_version`. It never touches the project's own content:
+new template (never changed by the project), changed by the project, or changed by both. It shows a diff
+for each file a person decides on (CONFLICT, CHANGED, UNKNOWN, and from 1.5 the 1.6 move's changes to each
+`CLAUDE.md` and `factory.toml`) and lists each such file once, under *For a person*; the diffs of the files
+`--apply` simply takes (BEHIND and NEW) go to a file the report names (`--diffs <path>` chooses it). An
+unchanged file of the Book's own template copy (`devtools/factory/book-template/`) that the new template
+dropped is RETIRED: `--apply` removes it. `--apply` updates only the files the project never changed,
+lists the rest for a person, and bumps `book_version` - unless a file changed by both (CONFLICT) or deleted
+by the project (REMOVED) is left: then `book_version` stays, the files are listed in `[book] pending_merge`,
+and every report and `book verify` names them until each is merged and taken off the list, when the next
+`--apply` bumps it. It never touches the project's own content:
 the documents init wrote from skeletons, plans, ledgers, `requirements/`.
+
+### Upgrade notes
+
+What a person does by hand when taking a release; the fixes themselves are in
+[`docs/defects.md`](docs/defects.md#fixed).
+
+**1.6.0** (book plugin v0.7.0):
+
+- **Read the report first.** From 1.5 the upgrade adds a section, *The 1.6 move*: each `CLAUDE.md` loses the
+  blocks that are the Book's (they now load from `.claude/book/` by an `@` import) and keeps the rest under
+  *This project's own rules*; `factory.toml` loses each key equal to the Book's defaults (`book config --json`
+  prints the merged view, which the move never changes). `--apply` writes both. Read what each `CLAUDE.md`
+  keeps: a block that says a Book rule in other words stays, and is yours to delete.
+- **CONFIRM items**, each named in the report: a list that holds the Book's default and more (move the more to
+  `[extend.<table>]` to keep the Book's later additions); run `/book:check-sources` once to give each open
+  question its **State**; run `book defects classify` (then `--apply`) to give each open defect its **Type**
+  and **Source**; run `python devtools/checks/check-rules.py --write`; and, for each file in
+  `[book] drift_accepted` (every Book file the project had changed), move the change to a setting or its
+  `CLAUDE.md`, or `[book] declined`, then take the entry out.
+- **The drift check.** `devtools/factory/book-files.lock` records the Book's files as the upgrade wrote them;
+  check-book fails a commit that changes one (`[book] drift_accepted` makes it a warning, with a reason).
+- **Move the plugin pin** to `ref = "v0.7.0"` where the upgrade did not (verify N16 says so).
+- **A pack's optional document** the project does not keep: `[book] skip_skeletons = ["docs/ui-standard.md"]`,
+  and neither verify nor the upgrade asks for it again.
+- **While a CONFLICT is left** `book_version` stays 1.5.x (`[book] pending_merge`, as in 1.5.1): the move is
+  written on the first `--apply` and not repeated on the next. Keep `[book] pending_merge_for` while you take
+  files off the list.
+- **`SPLIT` files are yours now, never to delete:** a dotnet Book's `src/CLAUDE.md` and its nested ones import
+  the stack's rules from `.claude/book/dotnet/`.
+- **Defaults that come back:** on the run that splits `factory.toml`, the report names each setting and code
+  rule the installed release wrote that the project had removed, which the defaults now give again. Set a
+  setting again in `factory.toml`; switch a code rule off with `[[code_rules]]`, its `id` and `enabled = false`.
+  A settings comment that is not the template's is kept, and named.
+- **The defaults files are needed:** a 1.6 Book whose `book-defaults*.toml` is missing has unreadable settings
+  (the guard refuses every call, naming the file, which a person restores; check-book names it too), never an
+  emptied guard. `[book] declined` can never name a defaults file or a `.claude/book/` file.
+- **The requirements register:** a Book with an old audit (`docs/Audit/spec-traceability.md`) converts it once
+  with `python devtools/book.py requirements import` (report first, then `--apply`); the report keeps naming
+  it until then. The import keeps every id and every audit cell (a column the register has no place for, and a
+  table with no ID column, go to `docs/requirements/evidence/`), fails if a cell is lost or a link breaks, and
+  names in CONFIRM lines what a person decides: an id held twice, and a dated pass section to merge into its
+  modules by hand. The register (`docs/requirements/<module>.md`) is then checked at every commit;
+  `.claude/book/docs.md`, *Requirements register*, has its rules.
+- **`book config --json`** with no key prints the whole merged settings.
+
+**1.5.1** (book plugin v0.6.1):
+
+- **Move the plugin pin**: upgrade updates `.claude/settings.json` to `ref = "v0.6.1"` where the project has not
+  changed it. Installing the plugin (`claude plugin install book@book-plugins --scope project`) writes that file
+  back with its keys in another order and nothing else changed: harmless, revert it with
+  `git checkout .claude/settings.json`.
+- **Requirements read-me files**: a `requirements/` read-me that is still its skeleton, but for its LINKS and
+  *Last checked* lines, is offered BEHIND with its old skill names renamed (`/requirements-check` becomes
+  `/book:check-sources`), and `--apply` writes it. A read-me the project wrote its own text into is named in a
+  CONFIRM note, line by line: rename those names by hand in the upgrade's pull request (a read-me may be edited
+  in place; check-sources' capture step is still Phase 4, Capture).
+- **The fe-guides pack**: `docs/fe-integration-guides/_template.md` arrives NEW. A missing
+  `docs/ui-standard.md` is named in a MISSING note with its skeleton: start it from that skeleton and fill it,
+  since `book verify` now asks for it.
+- **Your own copies of the skeletons**: the `factory.toml` header ("Read by devtools/book.py") and the AI
+  guide's note on the settings rewrite changed in the template; a project's copies are its own, so carry them
+  over by hand if you want them. The Cursor rule and `AGENTS.md` are the template's, and upgrade updates them.
+- **A conflict left by `--apply`** keeps `book_version` at 1.5.0 and is listed in `[book] pending_merge`:
+  carry the template's change over (the report's diff), take the file off the list, and run `--apply` again.
+- **An open question headed with `**Recommendation:**`** where `[book] recommendation_heading` sets another
+  now fails check-book: rename the heading.
 
 ## Work in this repository
 

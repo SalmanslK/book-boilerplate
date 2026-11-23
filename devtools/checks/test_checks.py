@@ -879,6 +879,20 @@ class ProtectedPathsTests(RepoTestCase):
         self.assertIn("nothing protected changed", out)
         return out
 
+    def test_the_commit_that_installs_the_book_reads_the_staged_rules(self):
+        # A repository whose base holds no Book yet: the commit installing it has only the index's rules (Book D59).
+        repo = Repo()
+        self.addCleanup(repo.close)
+        repo.write("README.md", "# A project\n")
+        repo.commit("Start")
+        repo.write(protected_paths.FACTORY_TOML, GUARD_TOML)
+        code, out = run_main(protected_paths.main, ["--staged", "--base", "main"], root=repo.root, env={})
+        self.assertEqual(code, 0, out)
+        self.assertIn("rules: [guard] in the staged index", out)
+        code, out = run_main(protected_paths.main, ["--base", "main"], root=repo.root, env={})
+        self.assertEqual(code, 1, "without --staged the index is not read")
+        self.assertIn("no rules to apply", out)
+
     def test_nothing_protected_changed_passes_with_one_line(self):
         self.change("src/Other.cs")
         self.assertEqual(self.assertPasses().count("\n"), 1)
@@ -1003,6 +1017,29 @@ class ProtectedPathsTests(RepoTestCase):
         code, out = run_main(protected_paths.main, ["--base", "qa", "--head", "main"], root=self.repo.root,
                              env={}, accepted={(commit, FSD_V1): "before the rule"})
         self.assertEqual(code, 0, out)
+
+    def test_an_accepted_rewrite_is_a_setting_the_base_holds(self):
+        """`[guard] accepted_rewrites` as the base branch holds it excuses the change; the head cannot add one."""
+        commit = self.promote_an_edit()
+        entry = f'accepted_rewrites = [{{ commit = "{commit}", path = "{FSD_V1}", reason = "before the rule" }}]\n'
+        # On the head only (main): the base (qa) holds no such entry, so the head cannot excuse itself.
+        self.change(protected_paths.FACTORY_TOML, GUARD_TOML.replace("[guard]\n", "[guard]\n" + entry, 1))
+        code, out = run_main(protected_paths.main, ["--base", "qa", "--head", "main"], root=self.repo.root, env={})
+        self.assertEqual(code, 1, out)
+        # On the base too: excused.
+        self.repo.git("checkout", "-q", "qa")
+        self.change(protected_paths.FACTORY_TOML, GUARD_TOML.replace("[guard]\n", "[guard]\n" + entry, 1))
+        code, out = run_main(protected_paths.main, ["--base", "qa", "--head", "main"], root=self.repo.root, env={})
+        self.assertEqual(code, 0, out)
+
+    def test_an_accepted_rewrite_without_a_reason_cannot_be_checked(self):
+        self.promote_an_edit()
+        self.repo.git("checkout", "-q", "qa")
+        self.change(protected_paths.FACTORY_TOML, GUARD_TOML.replace(
+            "[guard]\n", f'[guard]\naccepted_rewrites = [{{ commit = "{"a" * 40}", path = "{FSD_V1}" }}]\n', 1))
+        code, out = run_main(protected_paths.main, ["--base", "qa", "--head", "main"], root=self.repo.root, env={})
+        self.assertEqual(code, 1)
+        self.assertIn("accepted_rewrites", out)
 
     def test_an_accepted_commit_excuses_no_other_change_to_the_file(self):
         commit = self.promote_an_edit()
@@ -1466,6 +1503,33 @@ class RulesJudgeTests(RepoTestCase):
 
 # ---------------------------------------------------------------- check-book
 
+
+class TableCells(unittest.TestCase):
+    """Book D73: check-book, book verify, defects classify and the register split a table row the same way."""
+
+    CASES = {
+        "| a | b |": ["a", "b"],
+        "| a \\| b | c |": ["a \\| b", "c"],
+        "| `x|y` | c |": ["`x", "y`", "c"],      # GitHub-style Markdown splits a code span's bare pipe too
+        "| `x\\|y` | c |": ["`x\\|y`", "c"],
+        "| a ` b | c |": ["a ` b", "c"],
+        "| a | ends \\|": ["a", "ends \\|"],
+        "a | b": ["a", "b"],
+        "|  | b |": ["", "b"],
+    }
+
+    def test_every_reader_splits_each_case_alike(self):
+        sys.path.insert(0, str(HERE.parent / "factory"))
+        import book
+        import book_migrate
+        import requirements_register
+        readers = {"check-book": check_book.table_cells, "book verify": book.cells,
+                   "defects classify": book_migrate.cells, "register": requirements_register.cells}
+        for line, want in self.CASES.items():
+            for name, split in readers.items():
+                self.assertEqual(split(line), want, f"{name}: {line}")
+
+
 OWNER_TABLE = """# Instructions
 
 ## Where knowledge lives
@@ -1502,124 +1566,221 @@ class BookTests(RepoTestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("keeps its rules (3 documents)", out)
 
+    def test_a_tracked_document_deleted_from_the_working_tree_is_named_not_a_crash(self):
+        # Book D86: every tracked document was read, so a deleted one stopped check-book with a traceback.
+        self.repo.commit()
+        (self.repo.root / "docs/plans/a.md").unlink()
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("docs/overview.md:5: links to plans/a.md#scope, which does not exist", out)
+
+    OPEN_QUESTIONS = ("# Open questions\n\n## Still open\n\n### The open questions in full\n\n"
+                 "#### Q7 · Widgets may be renamed\n**Status:** OPEN · **Raised:** 2026-11-20\n\nThe question.\n\n"
+                 "{heading} rename them in place.\n\n"
+                 "#### Q6 · Widgets have colours\n**Status:** ANSWERED · **Raised:** 2026-11-01\n\n"
+                 "**Recommendation:** an older heading, answered.\n\n## Resolved\n")
+
+    def questions(self, heading: str, project_heading: str) -> tuple[list[str], list[str]]:
+        self.repo.write("docs/open-questions.md", self.OPEN_QUESTIONS.format(heading=heading))
+        return check_book.recommendation_problems(self.repo.root, project_heading)
+
+    def test_an_open_question_uses_the_projects_recommendation_heading(self):
+        # Book D51: a skill wrote the template's **Recommendation:** where the project had set its own heading.
+        self.assertEqual(self.questions("**What we suggest:**", "**What we suggest:**"), ([], []))
+        self.assertEqual(self.questions("**Recommendation:**", "**Recommendation:**"), ([], []))
+        problems, warnings = self.questions("**Recommendation:**", "**What we suggest:**")
+        self.assertEqual(len(problems), 1, "the default heading where the project set another fails")
+        self.assertIn("Q7 is open and its recommendation is headed **Recommendation:**", problems[0])
+        self.assertEqual(warnings, [], "the answered Q6 keeps the heading it was written with")
+        problems, warnings = self.questions("We think:", "**What we suggest:**")
+        self.assertEqual(problems, [], "no heading at all is only warned of")
+        self.assertIn("Q7 is open with no **What we suggest:** line", warnings[0])
+
+    def test_the_heading_comes_from_factory_toml_by_default(self):
+        self.repo.write("docs/open-questions.md", self.OPEN_QUESTIONS.format(heading="**Recommendation:**"))
+        with mock.patch.object(check_book, "RECOMMENDATION", "**What we suggest:**"):
+            problems, _ = check_book.recommendation_problems(self.repo.root)
+        self.assertEqual(len(problems), 1)
+
     DEFECTS = ("# Defects\n\n## Open\n\n| Id | Sev | Status | Defect | Where | Found by | Note |\n"
                "|---|---|---|---|---|---|---|\n{rows}\n")
+    TYPED = ("# Defects\n\n## Open\n\n| Id | Sev | Status | Type | Source | Defect | Where | Note |\n"
+               "|---|---|---|---|---|---|---|---|\n{rows}\n\n## Fixed\n\n{fixed}\n")
+    OPEN = "| {id} | 🟡 | {status} | {type} | {source} | x | y | found {found} |"
 
-    def defect(self, found_by: str, found: str) -> str:
-        return f"| D9 | 🟡 | Open | x | y | {found_by} | *Class: other · found {found}* |"
-
-    def found_by(self, *rows: str, rel: str = "docs/defects.md") -> list[str]:
-        self.repo.write(rel, self.DEFECTS.format(rows="\n".join(rows)))
-        # The tests' own adoption date: a repository's `[book] found_by_from` (none in a new Book) is not theirs.
-        with mock.patch.object(check_book, "FOUND_BY_FROM", "2026-11-16"):
-            return check_book.found_by_problems(self.repo.root)
-
-    def test_a_new_defect_found_by_a_listed_word_passes(self):
-        for found_by in ("PR review, PR #60", "Review", "Guard/CI — check-book", "**Spec audit**", "Requirement change",
-                         "QA team, build 3"):
-            with self.subTest(found_by):
-                self.assertEqual(self.found_by(self.defect(found_by, "2026-11-16")), [])
-
-    def test_a_new_defect_found_by_free_text_fails(self):
-        for found_by in ("The developer, while reviewing", "Reviewer", "Testing", "Guard/CIs"):
-            with self.subTest(found_by):
-                problems = self.found_by(self.defect(found_by, "2026-11-20"))
-                self.assertEqual(len(problems), 1, problems)
-                self.assertIn("docs/defects.md:7", problems[0])
-
-    def test_an_older_defect_keeps_its_wording(self):
-        self.assertEqual(self.found_by(self.defect("The developer, while reviewing", "2026-11-15")), [])
-
-    def test_the_archive_is_held_to_it_too(self):
-        problems = self.found_by(self.defect("someone", "2026-12-01"), rel="docs/archive/defects-closed.md")
-        self.assertEqual(len(problems), 1, problems)
-
-    CLASSES = "# Docs\n\n## Defects\n\n  | Class | The mistake |\n  |---|---|\n  | `api-contract` | x |\n  | `other` | y |\n"
-    OPEN = "| {id} | 🟡 | {status} | x | y | Test | *Class: {cls} · found {found}* |"
-
-    def ledger(self, *rows: str, archived: str = "", gate: str = "2026-11-20") -> list[str]:
-        self.repo.write("docs/CLAUDE.md", self.CLASSES)
-        self.repo.write("docs/defects.md", self.DEFECTS.format(rows="\n".join(rows)))
-        if archived:
-            self.repo.write("docs/archive/defects-closed.md", "# Closed\n\n| Id | Sev | Defect |\n|---|---|---|\n"
-                                                              + archived + "\n")
-        with mock.patch.object(check_book, "CLASS_FROM", gate):
+    def ledger(self, *rows: str, fixed: str = "", gate: str = "2026-11-20",
+               table: str | None = None) -> tuple[list[str], list[str]]:
+        self.repo.write("docs/defects.md", (table or self.TYPED).format(rows="\n".join(rows), fixed=fixed))
+        with mock.patch.object(check_book, "TYPE_SOURCE_FROM", gate):
             return check_book.ledger_problems(self.repo.root)
 
-    def test_an_open_row_with_a_listed_status_and_class_passes(self):
+    def row(self, status: str = "Open", type: str = "bug", source: str = "qa: PROJ-3", found: str = "2026-11-21",
+            id: str = "D9") -> str:
+        return self.OPEN.format(id=id, status=status, type=type, source=source, found=found)
+
+    def test_an_open_row_with_a_listed_status_type_and_source_passes(self):
         for status in ("Open", "Mitigated", "Partial", "Blocked — Q12", "**Blocked — the BA**"):
             with self.subTest(status):
-                row = self.OPEN.format(id="D9", status=status, cls="api-contract", found="2026-11-21")
-                self.assertEqual([], self.ledger(row))
+                self.assertEqual(([], []), self.ledger(self.row(status=status)))
+        for kind in check_book.TYPES:
+            for source in check_book.SOURCES:
+                with self.subTest(kind=kind, source=source):
+                    self.assertEqual(([], []), self.ledger(self.row(type=f"`{kind}`", source=f"{source}: ref 1")))
 
     def test_an_open_row_with_another_status_fails(self):
         for status in ("In progress", "Blocked", "Fixed", ""):
             with self.subTest(status):
-                problems = self.ledger(self.OPEN.format(id="D9", status=status, cls="other", found="2026-11-21"))
+                problems, _ = self.ledger(self.row(status=status))
                 self.assertEqual(1, len(problems), problems)
                 self.assertIn("D9's Status", problems[0])
 
     def test_an_open_row_without_a_found_date_fails(self):
-        problems = self.ledger("| D9 | 🟡 | Open | x | y | Test | no class here |")
+        problems, _ = self.ledger("| D9 | 🟡 | Open | bug | qa: X-1 | x | y | no date here |")
         self.assertEqual(1, len(problems), problems)
         self.assertIn("does not say when it was found", problems[0])
 
-    def test_a_row_found_after_the_gate_with_an_unlisted_class_fails_and_before_it_passes(self):
-        problems = self.ledger(self.OPEN.format(id="D9", status="Open", cls="logic", found="2026-11-20"))
-        self.assertEqual(1, len(problems), problems)
-        self.assertIn("D9's class 'logic' is not in docs/CLAUDE.md's list (api-contract, other)", problems[0])
-        self.assertEqual([], self.ledger(self.OPEN.format(id="D9", status="Open", cls="logic", found="2026-11-19")))
+    def test_an_unknown_type_or_source_fails_whenever_the_row_was_found(self):
+        for found in ("2026-11-21", "2026-01-01"):
+            with self.subTest(found):
+                problems, _ = self.ledger(self.row(type="logic", found=found))
+                self.assertEqual(1, len(problems), problems)
+                self.assertIn("D9's Type 'logic' is not one of spec-divergence", problems[0])
+                problems, _ = self.ledger(self.row(source="PR review: PR #4", found=found))
+                self.assertEqual(1, len(problems), problems)
+                self.assertIn("does not start with one of qa, fe", problems[0])
 
-    def test_a_row_found_after_the_gate_without_a_class_fails(self):
-        problems = self.ledger("| D9 | 🟡 | Open | x | y | Test | found 2026-11-21 |")
-        self.assertEqual(1, len(problems), problems)
-        self.assertIn("has no *Class: <class> · found <date>*", problems[0])
+    def test_a_source_without_its_reference_fails(self):
+        for source in ("qa", "code-review:", "`audit`:  "):
+            with self.subTest(source):
+                problems, _ = self.ledger(self.row(source=source))
+                self.assertEqual(1, len(problems), problems)
+                self.assertIn("has no reference", problems[0])
 
-    def test_a_closed_row_is_held_from_the_gate_and_never_before_it(self):
-        archived_new = "| D3 | 🟡 | x | *Class: build-drift · found 2026-11-22* |"
-        archived_old = "| D2 | 🟡 | x | *Class: build-drift · found 2026-10-01* |"
-        problems = self.ledger(archived="\n".join([archived_old, archived_new]))
+    def test_a_missing_type_or_source_fails_from_the_gate_and_warns_before_it(self):
+        problems, warnings = self.ledger(self.row(type="—", source="", found="2026-11-20"))
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("docs/archive/defects-closed.md", problems[0])
-        self.assertIn("D3's class 'build-drift'", problems[0])
+        self.assertIn("D9 has no Type and Source", problems[0])
+        problems, warnings = self.ledger(self.row(type="—", found="2026-11-19"))
+        self.assertEqual([], problems)
+        self.assertIn("D9 has no Type", warnings[0])
+        self.assertIn("book defects classify", warnings[0])
+
+    def test_a_blocked_row_need_not_carry_them_but_what_it_carries_is_checked(self):
+        self.assertEqual(([], []), self.ledger(self.row(status="Blocked — Q3", type="—", source="—")))
+        problems, _ = self.ledger(self.row(status="Blocked — Q3", type="oops", source="—"))
+        self.assertEqual(1, len(problems), problems)
+
+    def test_a_ledger_without_the_columns_only_warns(self):
+        old = ("# Defects\n\n## Open\n\n| Id | Sev | Status | Defect | Where | Found by | Note |\n"
+               "|---|---|---|---|---|---|---|\n{rows}\n\n## Fixed\n\n{fixed}\n")
+        problems, warnings = self.ledger("| D9 | 🟡 | Open | x | y | Review | *Class: other · found 2026-11-21* |",
+                                         table=old)
+        self.assertEqual([], problems)
+        self.assertEqual(1, len(warnings), warnings)
+        self.assertIn("no Type and Source columns", warnings[0])
+
+    def test_the_archive_and_the_fixed_entries_are_exempt(self):
+        self.repo.write("docs/archive/defects-closed.md", "# Closed\n\n| Id | Sev | Status | Type | Source | Defect |\n"
+                                                          "|---|---|---|---|---|---|\n| D3 | 🟡 | x | oops | who | y |\n")
+        fixed = "| Id | Defect | Fixed in |\n|---|---|---|\n| D4 | a thing, found 2026-12-01 | PR #4 |"
+        self.assertEqual(([], []), self.ledger(fixed=fixed))
 
     def test_a_gate_that_is_not_a_date_could_not_be_checked(self):
         for gate in ("2026/11/20", "20 Nov 2026", ""):
             with self.subTest(gate):
-                problems = self.ledger(self.OPEN.format(id="D9", status="Open", cls="logic", found="2026-11-21"),
-                                       gate=gate)
+                problems, _ = self.ledger(self.row(), gate=gate)
                 self.assertEqual(1, len(problems), problems)
                 self.assertIn("not a YYYY-MM-DD date", problems[0])
 
-    def test_a_fixed_index_entry_is_not_a_row_to_judge(self):
-        self.repo.write("docs/CLAUDE.md", self.CLASSES)
-        self.repo.write("docs/defects.md", "# Defects\n\n## Open\n\n## Fixed\n\n| Id | Defect | Fixed in |\n|---|---|---|\n"
-                                           "| D4 | a thing, found 2026-12-01 | PR #4 |\n")
-        with mock.patch.object(check_book, "CLASS_FROM", "2026-11-20"):
-            self.assertEqual([], check_book.ledger_problems(self.repo.root))
+    def test_the_lists_are_the_ones_the_books_rules_give(self):
+        text = (check_book.ROOT / ".claude" / "book" / "docs.md").read_text(encoding="utf-8")
+        section = text.split("\n## Defects", 1)[1].split("\n## ", 1)[0]
+        listed = re.findall(r"^\s*\| `([a-z][\w-]*)` \|", section, re.M)
+        self.assertEqual(listed, list(check_book.TYPES) + list(check_book.SOURCES))
 
-    def test_without_a_class_table_a_dated_row_could_not_be_checked(self):
-        self.repo.write("docs/defects.md", self.DEFECTS.format(
-            rows=self.OPEN.format(id="D9", status="Open", cls="other", found="2026-11-21")))
-        with mock.patch.object(check_book, "CLASS_FROM", "2026-11-20"):
-            problems = check_book.ledger_problems(self.repo.root)
+    def test_the_counts_are_by_type_and_by_source(self):
+        self.ledger(self.row(id="D1"), self.row(id="D2", type="security", source="code-review: PR #2"),
+                    self.row(id="D3", source="qa: PROJ-9"), self.row(id="D4", type="—", source="—"))
+        types, sources = check_book.defect_counts(self.repo.root)
+        self.assertEqual(types, {"bug": 2, "security": 1, "—": 1})
+        self.assertEqual(sources, {"qa": 2, "code-review": 1, "—": 1})
+
+    STATES = ("# Questions\n\n## Still open\n\n### The open questions in full\n\n{open}\n\n"
+              "## Answered, waiting for the FSD text\n\n{answered}\n\n## Superseded\n\n## Resolved\n\n")
+
+    def states(self, open: str = "", answered: str = "", archived: str = "") -> tuple[list[str], list[str]]:
+        self.repo.write("docs/open-questions.md", self.STATES.format(open=open, answered=answered))
+        if archived:
+            self.repo.write("docs/archive/questions-resolved.md", "# Resolved\n\n" + archived + "\n")
+        return check_book.question_state_problems(self.repo.root)
+
+    @staticmethod
+    def question(ident: str, state: str, posted: str = "—", answered: str = "—", text: str = "not yet") -> str:
+        return (f"#### {ident} — A question\n\n**State:** {state} · **Posted:** {posted} · **Answered:** {answered} · "
+                f"**In FSD text:** {text} · **Thread resolved:** no\n\nThe question.\n")
+
+    def test_the_fields_of_a_state_line_are_read(self):
+        fields = check_book.state_fields("**State:** OPEN · POSTED · **Posted:** 2026-11-02, thread 4 · "
+                                         "**Answered:** — · **In FSD text:** not yet · **Thread resolved:** no")
+        self.assertEqual(fields, {"State": "OPEN · POSTED", "Posted": "2026-11-02, thread 4", "Answered": "—",
+                                  "In FSD text": "not yet", "Thread resolved": "no"})
+
+    def test_each_state_in_its_place_with_its_fields_passes(self):
+        problems, warnings = self.states(
+            open=self.question("Q1", "OPEN · NOT POSTED") + self.question("Q2", "OPEN · POSTED", posted="2026-11-02"),
+            answered=self.question("Q3", "ANSWERED · THREAD ONLY", posted="2026-11-02", answered="2026-11-05, BA"),
+            archived=self.question("Q4", "RESOLVED", posted="2026-11-01", answered="2026-11-03, BA",
+                                   text="V12 §2.4").replace("####", "##"))
+        self.assertEqual((problems, warnings), ([], []))
+
+    def test_each_state_without_the_field_it_needs_fails(self):
+        cases = [(self.question("Q2", "OPEN · POSTED"), "", "Q2 is OPEN · POSTED but has no Posted"),
+                 ("", self.question("Q3", "ANSWERED · THREAD ONLY", posted="2026-11-02"),
+                  "Q3 is ANSWERED · THREAD ONLY but has no Answered")]
+        for open_, answered, expected in cases:
+            with self.subTest(expected):
+                problems, _ = self.states(open=open_, answered=answered)
+                self.assertEqual(1, len(problems), problems)
+                self.assertIn(expected, problems[0])
+        problems, _ = self.states(archived=self.question("Q4", "RESOLVED", answered="2026-11-03, BA").replace("####", "##"))
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("could not be checked", problems[0])
+        self.assertIn("Q4 is RESOLVED but has no In FSD text", problems[0])
 
-    def test_the_class_list_is_the_one_the_docs_claude_md_skeleton_gives(self):
-        skeleton = check_book.ROOT / "devtools" / "factory" / "book-template" / "skeletons" / "docs-CLAUDE.md.tmpl"
-        self.repo.write("docs/CLAUDE.md", skeleton.read_text(encoding="utf-8"))
-        classes = check_book.defect_classes(self.repo.root)
-        for added in ("error-handling", "test-flake", "performance", "observability"):
-            self.assertIn(added, classes)
-        self.assertEqual("other", classes[-1])
-        self.assertEqual(classes, check_book.defect_classes(check_book.ROOT))
+    def test_a_state_off_the_list_fails(self):
+        problems, _ = self.states(open=self.question("Q1", "ANSWERED"))
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("Q1's State 'ANSWERED' is not one of", problems[0])
 
-    def test_the_word_list_is_the_one_docs_claude_md_gives(self):
-        text = (check_book.ROOT / "docs" / "CLAUDE.md").read_text(encoding="utf-8")
-        start = text.index("***Found by* starts with one of these words**")
-        listed = re.findall(r"`([^`]+)`", text[start:text.index("Older rows keep their wording", start)])
-        self.assertEqual(listed, list(check_book.FOUND_BY_WORDS))
+    def test_a_question_in_the_wrong_place_fails(self):
+        resolved = self.question("Q5", "RESOLVED", answered="2026-11-03, BA", text="V12 §2")
+        problems, _ = self.states(open=resolved)
+        self.assertIn("is RESOLVED but still in docs/open-questions.md", problems[0])
+        problems, _ = self.states(open=self.question("Q3", "ANSWERED · THREAD ONLY", posted="a", answered="b"))
+        self.assertIn("belongs under ## Answered, waiting for the FSD text", problems[0])
+        problems, _ = self.states(answered=self.question("Q1", "OPEN · NOT POSTED"))
+        self.assertIn("belongs under ## Still open", problems[0])
+        problems, _ = self.states(archived=self.question("Q6", "OPEN · NOT POSTED").replace("####", "##"))
+        self.assertIn("is archived but its State is OPEN · NOT POSTED", problems[0])
+
+    def test_a_question_without_a_state_only_warns_and_an_old_archive_is_not_judged(self):
+        old = "#### Q7 — Old\n\n**Status:** OPEN · **Raised:** 2026-09-01\n\n**Recommendation:** x\n"
+        problems, warnings = self.states(open=old, archived="## Q1 — Older\n\n**Status:** ANSWERED\n")
+        self.assertEqual(problems, [])
+        self.assertEqual(1, len(warnings), warnings)
+        self.assertIn("Q7 has no **State:** line", warnings[0])
+
+    def test_the_counts_are_per_state(self):
+        self.states(open=self.question("Q1", "OPEN · NOT POSTED") + self.question("Q2", "OPEN · NOT POSTED")
+                    + "#### Q8 — Old\n\n**Status:** OPEN\n",
+                    answered=self.question("Q3", "ANSWERED · THREAD ONLY", posted="a", answered="b"))
+        self.assertEqual(check_book.question_counts(self.repo.root),
+                         {"OPEN · NOT POSTED": 2, "OPEN · POSTED": 0, "ANSWERED · THREAD ONLY": 1, "no State yet": 1})
+
+    def test_an_open_question_with_a_state_line_still_needs_its_recommendation(self):
+        self.repo.write("docs/open-questions.md", self.STATES.format(open=self.question("Q1", "OPEN · NOT POSTED"),
+                                                                     answered=""))
+        _, warnings = check_book.recommendation_problems(self.repo.root)
+        self.assertIn("Q1 is open with no", warnings[0])
 
     QUESTIONS = ("# Questions\n\n## Still open\n\n| Id | Question |\n|---|---|\n{rows}\n\n"
                  "### The open questions in full\n\n{open}\n\n## Superseded\n\n{superseded}\n\n"
@@ -1742,6 +1903,21 @@ class BookTests(RepoTestCase):
         code, out = self.check()
         self.assertEqual(code, 1)
         self.assertIn("struck-through text", out)
+
+    def test_a_converted_registers_struck_text_warns_and_a_written_ones_fails(self):
+        # Book D74: a converted register carries the audit's own history until a person tidies it.
+        mark = check_book.requirements_register.CONVERTED
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "docs/requirements/evidence").mkdir(parents=True)
+            (root / "docs/requirements/labs.md").write_text(f"# Labs\n\n{mark}\n\n~~old~~ new\n", encoding="utf-8")
+            (root / "docs/requirements/evidence/labs.md").write_text(f"# E\n\n{mark}\n\n~~x~~\n", encoding="utf-8")
+            (root / "docs/requirements/own.md").write_text("# Own\n\n~~old~~ new\n", encoding="utf-8")
+            files = ["docs/requirements/labs.md", "docs/requirements/evidence/labs.md", "docs/requirements/own.md"]
+            failures = check_book.history_problems(files, root)
+            warnings = check_book.history_problems(files, root, converted=True)
+        self.assertEqual([p.split(":")[0] for p in failures], ["docs/requirements/own.md"])
+        self.assertEqual([p.split(":")[0] for p in warnings], files[:2])
 
     def test_a_link_inside_a_code_fence_is_not_checked(self):
         self.repo.write("docs/plans/b.md", "# B\n\n```\n[gone](../gone.md)\n```\n")
@@ -2368,7 +2544,7 @@ TEMPLATE = HERE.parents[1] / "devtools" / "factory" / "book-template"
 
 
 def shipped_rules(source: Path) -> dict:
-    """The [[code_rules]] a template file ships, by id: the skeleton factory.toml or a pack's append."""
+    """The [[code_rules]] a defaults file ships, by id: the core book-defaults.toml or a stack's."""
     import tomllib
     text = source.read_text(encoding="utf-8")
     text = re.sub(r"\{\{(?:owners_toml|review_scope)\}\}", "", text)
@@ -2401,6 +2577,17 @@ class CodeRulesTests(RepoTestCase):
         self.assertEqual(1, code)
         self.assertIn("src/A.cs:2: anon", out)
         self.assertNotIn("src/A.cs:1", out)
+
+    def test_a_default_rule_the_project_switches_off_is_not_checked(self):
+        self.repo.write("devtools/factory/book-defaults.toml", self.BAN)
+        self.repo.write("devtools/factory/factory.toml", '[[code_rules]]\nid = "anon"\nenabled = false\n')
+        self.repo.write("src/A.cs", "map.AllowAnonymous();\n")
+        code, out = self.run_full()
+        self.assertEqual(0, code, out)
+        self.repo.write("devtools/factory/factory.toml", '[[code_rules]]\nid = "anon"\nenabled = true\n')
+        code, out = self.run_full()
+        self.assertEqual(1, code, out)
+        self.assertIn("src/A.cs:1: anon", out)
 
     def test_an_allow_listed_file_passes_at_its_count(self):
         self.config('allowed = [{ file = "src/A.cs", count = 2, reason = "sign-in" }]\n')
@@ -2494,7 +2681,7 @@ class CodeRulesTests(RepoTestCase):
         self.assertIn("not both", out)
 
     def test_the_skeleton_ddl_rule_refuses_schema_and_leaves_temp_tables_and_data(self):
-        rule = shipped_rules(TEMPLATE / "skeletons" / "factory.toml.tmpl")["data-script-ddl"]
+        rule = shipped_rules(HERE.parent / "factory" / "book-defaults.toml")["data-script-ddl"]
         pattern = re.compile(rule["pattern"])
         for ddl in ("CREATE TABLE widgets (id int);", "alter table widgets add column x int;",
                     "CREATE UNIQUE INDEX ix ON t (a);", "DROP VIEW v;", "CREATE OR REPLACE FUNCTION f()",
@@ -2506,7 +2693,7 @@ class CodeRulesTests(RepoTestCase):
         self.assertEqual(["database-scripts/**/*.sql"], rule["files"])
 
     def test_a_ddl_line_in_a_seed_fails_the_full_run(self):
-        skeleton = (TEMPLATE / "skeletons" / "factory.toml.tmpl").read_text(encoding="utf-8")
+        skeleton = (HERE.parent / "factory" / "book-defaults.toml").read_text(encoding="utf-8")
         block = re.search(r'\[\[code_rules\]\]\nid = "data-script-ddl"\n.*?\nmessage = [^\n]*\n', skeleton, re.S)
         self.repo.write("devtools/factory/factory.toml", block.group(0))
         self.repo.write("database-scripts/seed/a.sql", "-- CREATE TABLE in a comment\nCREATE TEMP TABLE m (i int);\n")
@@ -2517,7 +2704,7 @@ class CodeRulesTests(RepoTestCase):
         self.assertIn("database-scripts/seed/a.sql:1: data-script-ddl", out)
 
     def test_the_dotnet_pack_rules_load_and_match_what_they_mean(self):
-        rules = shipped_rules(TEMPLATE / "packs" / "dotnet" / "factory-append.toml")
+        rules = shipped_rules(TEMPLATE / "packs" / "dotnet" / "devtools" / "factory" / "book-defaults" / "dotnet.toml")
         self.assertEqual({"anonymous-route", "handler-side-effect", "config-by-literal", "pending-model-test"},
                          set(rules))
         for entry in rules.values():
@@ -2534,6 +2721,33 @@ class CodeRulesTests(RepoTestCase):
         self.assertTrue(handler.search("public sealed class Sent(IEmailSender sender)"))
         self.assertFalse(handler.search("public sealed class Sent(IOutbox outbox)"))
         self.assertEqual(1, rules["pending-model-test"]["require"])
+
+
+class PrintsUtf8(unittest.TestCase):
+    """Book D45: a script that prints an em dash failed on a Windows console's code page (cp437)."""
+
+    def scripts(self) -> list[Path]:
+        folders = [HERE, *sorted((HERE.parents[1] / "devtools/factory/book-template/packs").glob("*/devtools/checks"))]
+        return [path for folder in folders for path in sorted(folder.glob("*.py"))
+                if not path.name.startswith("test_") and "print(" in path.read_text(encoding="utf-8")]
+
+    def test_every_script_that_prints_writes_utf8(self):
+        lacking = [path.name for path in self.scripts()
+                   if 'stdout.reconfigure(encoding="utf-8"' not in path.read_text(encoding="utf-8")
+                   and "stream.reconfigure(encoding=\"utf-8\")" not in path.read_text(encoding="utf-8")]
+        self.assertEqual(lacking, [])
+
+    def test_an_em_dash_prints_under_a_legacy_code_page(self):
+        # check-book.py prints its problems; under cp437 (a Windows console) an em dash in one failed before the guard.
+        with tempfile.TemporaryDirectory() as folder:
+            script = Path(folder) / "speak.py"
+            body = (HERE / "check-book.py").read_text(encoding="utf-8").split('if __name__ == "__main__":', 1)[1]
+            guard = body.split("raise SystemExit", 1)[0].split("sys.exit", 1)[0]
+            script.write_text("import sys\nif True:" + guard + "print('—')\n", encoding="utf-8")
+            result = subprocess.run([sys.executable, str(script)], capture_output=True,
+                                    env=dict(os.environ, PYTHONIOENCODING="cp437"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.decode("utf-8").strip(), "—")
 
 
 if __name__ == "__main__":

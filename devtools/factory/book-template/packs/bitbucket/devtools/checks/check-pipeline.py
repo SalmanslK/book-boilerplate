@@ -147,4 +147,8 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
 
 
 if __name__ == "__main__":
+    # UTF-8 out, so an em dash prints on a Windows console's code page too (Book D45).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     raise SystemExit(main())

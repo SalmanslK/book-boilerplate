@@ -116,6 +116,25 @@ class TooSlowToJudge(Exception):
 _RULES: list[Rules] = []
 
 
+def settings() -> dict:
+    """factory.toml merged over the Book's defaults beside it (book_config.py, in the guard's parent folder). A
+    loader or a defaults file that cannot be read is no empty layer: the guard then cannot judge, and says so."""
+    folder = os.path.dirname(FACTORY_CONFIG)
+    if os.path.dirname(HERE) not in sys.path:
+        sys.path.insert(0, os.path.dirname(HERE))
+    import book_config
+    prefix = "devtools/factory/"
+
+    def read(rel: str) -> str | None:
+        path = os.path.join(folder, rel[len(prefix):] if rel.startswith(prefix) else rel)
+        if not os.path.isfile(path):
+            return None
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+    with open(FACTORY_CONFIG, encoding="utf-8") as handle:
+        return book_config.load_text(handle.read(), read, FACTORY_CONFIG)
+
+
 def rules() -> Rules:
     if _RULES:
         return _RULES[0]
@@ -124,8 +143,7 @@ def rules() -> Rules:
     except ModuleNotFoundError as error:
         raise RulesUnavailable("the guard needs Python 3.11+ to read factory.toml") from error
     try:
-        with open(FACTORY_CONFIG, "rb") as handle:
-            raw = tomllib.load(handle)
+        raw = settings()
         guard = raw["guard"]
         words = "|".join(re.escape(word) for word in guard.get("non_dev_targets", []))
         loaded = Rules(
@@ -154,8 +172,12 @@ def rules() -> Rules:
             banned_tools=tuple((tuple(str(name).lower() for name in entry["names"]), str(entry["reason"]))
                                for entry in guard.get("banned_tools", [])),
         )
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, re.error) as error:
-        raise RulesUnavailable(f"could not read [guard] from {FACTORY_CONFIG}: {type(error).__name__}") from error
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, ImportError, re.error) as error:
+        # A settings error names the file and what is wrong with it (never a value), so the person knows what
+        # to restore; the session cannot, since every call is refused until it is.
+        detail = f"{type(error).__name__}: {error}" if isinstance(error, ValueError) else type(error).__name__
+        raise RulesUnavailable(f"could not read [guard] from {FACTORY_CONFIG}: {detail}. Restore or fix the file "
+                               "outside this session (`git checkout -- <file>`)") from error
     _RULES.append(loaded)
     return loaded
 
@@ -2213,8 +2235,9 @@ COMMAND_SCRIPT = re.compile(r"(?:^|[/\\])(?:factory|book)\.py$|devtools(?:factor
 # Or run as a module (`python -m book`, `-m devtools.book`, `-m devtools.factory.factory`, joined as `-mbook`, or
 # uv's `--module book`).
 COMMAND_MODULE = re.compile(r"^(?:devtools\.)?(?:factory\.)?(?:book|factory)$")
-# Or from `python -c` code that runs the script or the module (`runpy.run_path('devtools/book.py')`).
-COMMAND_IN_CODE = re.compile(r"""run_path\(\s*(?:r?['"])[^'"]*(?:factory|book)\.py['"]|"""
+# Or from `python -c` code that names the script, however it runs it (`runpy.run_path('devtools/book.py')`,
+# `exec(open('devtools/book.py').read())`: Book D55), or runs the module. `notebook.py` is not it.
+COMMAND_IN_CODE = re.compile(r"""(?<![\w.-])(?:factory|book)\.py\b|"""
                              r"""run_module\(\s*['"](?:devtools\.)?(?:factory\.)?(?:book|factory)['"]""", re.I)
 # Tools that run a command in a project's environment: what follows their word is a Python, the script or a
 # module, as after `uv run`. `uvx` runs one directly (`uvx python devtools/book.py`).
@@ -2256,6 +2279,8 @@ def command_arguments(name: str, args: list[str]) -> list[str] | None:
         if arg == "-c" and index + 1 < len(args) and COMMAND_IN_CODE.search(args[index + 1]):
             # The code may set its own argv: its words are judged with what follows it.
             return re.findall(r"[\w.=-]+", args[index + 1]) + args[index + 2:]
+        if arg.startswith("-c") and len(arg) > 2 and COMMAND_IN_CODE.search(arg[2:]):
+            return re.findall(r"[\w.=-]+", arg[2:]) + args[index + 1:]  # `-c<code>`, run together
         if COMMAND_SCRIPT.search(arg.lower()):
             return args[index + 1:]
         if module_option(args, index):
@@ -2435,6 +2460,8 @@ def git_findings(args: list[str], cwd: str, repo: Repo) -> list[Finding]:
     elif sub == "branch" and any(arg in ("-d", "-D", "--delete") or re.match(r"^-[a-zA-Z]*[dD]", arg) for arg in rest):
         findings.append(Finding(
             "branch-delete", DENY, "Never delete a branch. Say it looks done, and stop there.", None))
+    elif sub in ("branch", "update-ref") and (local := local_ref_findings(sub, rest)):
+        findings += local
     elif sub in ("commit", "merge", "rebase", "cherry-pick", "revert", "am"):
         known = repo.knows(cwd)
         branch = repo.current_branch(cwd if known else None)
@@ -2452,6 +2479,65 @@ def git_findings(args: list[str], cwd: str, repo: Repo) -> list[Finding]:
         elif not known:
             findings.append(UNKNOWN_CHECKOUT_FINDING)
     return findings
+
+
+MOVE_PROTECTED_FINDING = Finding(
+    "move-protected-branch", DENY,
+    "This moves or replaces a protected branch in this checkout. dev takes pull requests only; "
+    "qa, uat and main are reached by promotion.", None)
+
+
+def local_ref_findings(sub: str, rest: list[str]) -> list[Finding]:
+    """
+    A local branch deleted or moved without `git branch -d` or a push (Book D54): `git update-ref -d
+    refs/heads/<any>` deletes one; `git branch -f <protected>`, `git branch -m|-M|-c|-C … <protected>` and
+    `git update-ref refs/heads/<protected> …` move or replace a protected one. A rename of a protected branch
+    to another name removes it, so it counts too.
+    """
+    protected = rules().protected_branches
+
+    def branch_name(ref: str) -> str:
+        return re.sub(r"^refs/heads/", "", ref)
+
+    if sub == "update-ref":
+        positional, skip = [], False
+        for arg in rest:
+            if skip:
+                skip = False
+            elif arg == "-m":
+                skip = True  # its value is the reflog message
+            elif not arg.startswith("-"):
+                positional.append(arg)
+        if "--stdin" in rest:
+            return [hidden("`git update-ref --stdin` reads the refs it changes when it runs.")]
+        if not positional:
+            return []
+        if "-d" in rest or "--delete" in rest:
+            return [Finding("branch-delete", DENY, "Never delete a branch. Say it looks done, and stop there.", None)] \
+                if positional[0].startswith("refs/heads/") else []
+        return [MOVE_PROTECTED_FINDING] if positional[0].startswith("refs/heads/") \
+            and branch_name(positional[0]) in protected else []
+    letters = "".join(arg[1:] for arg in rest if re.match(r"^-[A-Za-z]+$", arg))
+    longs = [arg.split("=", 1)[0] for arg in rest if arg.startswith("--")]
+    positional = [branch_name(arg) for arg in rest if not arg.startswith("-")]
+    if not positional:
+        return []
+
+    def long_flag(shortest: str, full: str) -> bool:
+        return any(len(name) >= len(shortest) and full.startswith(name) for name in longs)
+
+    moves = any(letter in letters for letter in "mM") or long_flag("--mov", "--move")
+    copies = any(letter in letters for letter in "cC") or long_flag("--cop", "--copy")
+    forced = "f" in letters or long_flag("--forc", "--force")
+    if moves:
+        touched = positional  # `-m [<old>] <new>`: the old name goes, the new one is replaced
+    elif copies:
+        touched = positional[-1:]
+    elif forced:
+        touched = positional[:1]  # `-f <branch> [<start>]`
+    else:
+        return []
+    return [MOVE_PROTECTED_FINDING] if any(name in protected for name in touched) else []
 
 
 FAST_FORWARD_QUIET_FLAGS = ("-q", "--quiet")
@@ -2704,16 +2790,49 @@ def git_restored_paths(sub: str, rest: list[str], cwd: str, repo: Repo) -> tuple
     return [], False
 
 
+# git takes any unambiguous prefix of a long option (`--de` is --delete, `--force-w` --force-with-lease), so a
+# push flag is judged from the shortest prefix that can name only it, or only flags of one kind: `--for` is
+# --force or --force-with-lease, while `--fo` may still be --follow-tags (Book D53).
+PUSH_LONG_FLAGS = {"delete": ("--de", ("--delete",)),
+                   "force": ("--for", ("--force", "--force-with-lease")),
+                   "every-branch": ("--al", ("--all",)),
+                   "mirror": ("--m", ("--mirror",)),
+                   "branches": ("--br", ("--branches",))}
+PUSH_SHORT_FLAGS = {"d": "delete", "f": "force"}
+
+
+def push_flag_kinds(flags: list[str]) -> set[str]:
+    """
+    What a `git push`'s flags ask for: `delete`, `force`, `every-branch`, `mirror` or `branches`. Short
+    flags written together count letter by letter (`-fd` is -f -d, `-uf` forces), up to an `o`, whose value
+    is the rest of the word (`-ofast` is a push option, not a force).
+    """
+    kinds: set[str] = set()
+    for flag in flags:
+        if flag.startswith("--"):
+            name = flag.split("=", 1)[0]
+            kinds |= {kind for kind, (shortest, fulls) in PUSH_LONG_FLAGS.items()
+                      if len(name) >= len(shortest) and any(full.startswith(name) for full in fulls)}
+            continue
+        for letter in flag[1:]:
+            if letter == "o":
+                break
+            if letter in PUSH_SHORT_FLAGS:
+                kinds.add(PUSH_SHORT_FLAGS[letter])
+    return kinds
+
+
 def push_findings(rest: list[str], cwd: str, repo: Repo) -> list[Finding]:
     findings: list[Finding] = []
     flags = [arg for arg in rest if arg.startswith("-")]
     positional = [arg for arg in rest if not arg.startswith("-")]
     refspecs = positional[1:]
+    kinds = push_flag_kinds(flags)
 
-    if any(flag in ("-d", "--delete") for flag in flags) or any(ref.startswith(":") for ref in refspecs):
+    if "delete" in kinds or any(ref.startswith(":") for ref in refspecs):
         findings.append(Finding(
             "branch-delete", DENY, "Never delete a branch, locally or on the remote.", None))
-    if any(flag in ("--all", "--mirror", "--branches") for flag in flags) or any("*" in ref for ref in refspecs):
+    if kinds & {"every-branch", "mirror", "branches"} or any("*" in ref for ref in refspecs):
         findings.append(Finding(
             "push-protected-branch", DENY, "--all, --mirror and a `*` refspec push to dev, qa, uat and main.", None))
 
@@ -2742,8 +2861,7 @@ def push_findings(rest: list[str], cwd: str, repo: Repo) -> list[Finding]:
     elif not known and (not refspecs or any(ref.lstrip("+").split(":", 1)[-1] in ("HEAD", "@") for ref in refspecs)):
         findings.append(UNKNOWN_CHECKOUT_FINDING)
 
-    forced = any(flag in ("-f", "--force") or flag.startswith("--force-with-lease") for flag in flags) \
-        or any(ref.startswith("+") for ref in refspecs)
+    forced = "force" in kinds or any(ref.startswith("+") for ref in refspecs)
     if forced and not protected:
         findings.append(Finding(
             "force-push", ASK, "A force-push rewrites history others may have. A person confirms it.", None))

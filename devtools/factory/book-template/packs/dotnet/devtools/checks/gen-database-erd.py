@@ -44,6 +44,12 @@ import tomllib
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+# The settings: factory.toml merged over the Book's defaults (devtools/factory/book_config.py).
+_FACTORY = next((p / "devtools" / "factory" for p in Path(__file__).resolve().parents
+                 if (p / "devtools" / "factory" / "book_config.py").is_file()), None)
+if _FACTORY is not None:
+    sys.path.insert(0, str(_FACTORY))
+import book_config  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 SNAPSHOT = ROOT / "src" / "Boilerplate.Persistence" / "Migrations" / "ApplicationDbContextModelSnapshot.cs"
@@ -461,8 +467,9 @@ def module_of(entity: str) -> str:
 
 
 def module_title(module: str) -> str:
-    if module in MODULE_TITLE_OVERRIDES:
-        return MODULE_TITLE_OVERRIDES[module]
+    titles = {**MODULE_TITLE_OVERRIDES, **ERD_SETTINGS.get("titles", {})}
+    if module in titles:
+        return titles[module]
     words = re.findall(r"[A-Z][a-z0-9]*", module) or [module]
     return " ".join([words[0]] + [w.lower() for w in words[1:]])
 
@@ -607,14 +614,36 @@ def scoping_column(root: Path = ROOT) -> str:
     """The column a user's data is scoped by inside the tenant: `<[book] scoping_word>_id` from
     devtools/factory/factory.toml (`store` gives `store_id`), or "" when the project has none."""
     try:
-        with open(root / "devtools" / "factory" / "factory.toml", "rb") as handle:
-            word = str((tomllib.load(handle).get("book") or {}).get("scoping_word") or "")
+        word = str((book_config.load(root).get("book") or {}).get("scoping_word") or "")
     except (OSError, ValueError):
         word = ""
     return f"{word.strip().lower().replace(' ', '_')}_id" if word.strip() else ""
 
 
 SCOPING_COLUMN = scoping_column()
+
+
+def erd_settings(root: Path = ROOT) -> dict:
+    """`[database_erd]`: `titles` (a module's heading where splitting its name is wrong) and `notes` (lines the
+    project adds under *Tenancy, scoping and auditing*, a rule its schema holds everywhere)."""
+    try:
+        table = book_config.load(root).get("database_erd") or {}
+    except (OSError, ValueError):
+        return {}
+    titles = table.get("titles") or {}
+    notes = table.get("notes") or []
+    if not isinstance(titles, dict) or not isinstance(notes, list):
+        raise SystemExit("gen-database-erd: [database_erd] titles is a table and notes a list of lines")
+    return {"titles": {str(k): str(v) for k, v in titles.items()}, "notes": [str(n) for n in notes]}
+
+
+ERD_SETTINGS = erd_settings()
+
+
+def scoping_words() -> str:
+    """`tenancy, lab scoping` with `[book] scoping_word = "lab"`; `tenancy, scoping` without one."""
+    word = SCOPING_COLUMN[:-len("_id")].replace("_", " ") if SCOPING_COLUMN else ""
+    return f"tenancy, {word} scoping" if word else "tenancy, scoping"
 
 
 def scoping_rows(tables: "OrderedDict[str, Table]") -> list[str]:
@@ -655,7 +684,7 @@ def render(tables: "OrderedDict[str, Table]", views: "OrderedDict[str, str]") ->
     w("> The source is `src/Boilerplate.Persistence/Migrations/ApplicationDbContextModelSnapshot.cs`,")
     w("> which EF rewrites on every migration — so this is the schema the next migration")
     w("> will produce, not a drawing of it. Why the schema is shaped this way belongs to")
-    w("> the feature plans in [`plans/`](plans/); the rules it follows — tenancy, scoping,")
+    w(f"> the feature plans in [`plans/`](plans/); the rules it follows — {scoping_words()},")
     w("> soft delete, audit actors — are in")
     w("> [`architecture.md`](architecture.md) and [`../CLAUDE.md`](../CLAUDE.md), and are")
     w("> not restated here.")
@@ -697,7 +726,7 @@ def render(tables: "OrderedDict[str, Table]", views: "OrderedDict[str, str]") ->
     w("")
     w("Every tenant-scoped table carries these four, and they are wired identically")
     w("everywhere — a `Restrict` foreign key with no navigation property, per the audit")
-    w("rules in [`../CLAUDE.md`](../CLAUDE.md).")
+    w("rules in [`../CLAUDE.md`](../CLAUDE.md)." + (" " + " ".join(ERD_SETTINGS["notes"]) if ERD_SETTINGS.get("notes") else ""))
     w("")
     w(render_universal())
     w("")
@@ -759,6 +788,12 @@ def main() -> int:
                     help="fail if docs/database-erd.md is out of date")
     args = ap.parse_args()
 
+    persistence = SNAPSHOT.parents[1]
+    if not SNAPSHOT.exists() and not any(p for p in persistence.rglob("*.cs") if not {"obj", "bin"} & set(p.parts)):
+        # A greenfield Book, before its first migration: nothing to draw yet, so its first commit passes (Book D59).
+        print("database-erd.md: N/A, no model snapshot yet (no C# under "
+              f"{persistence.relative_to(ROOT).as_posix()}/)")
+        return 0
     if not SNAPSHOT.exists():
         raise SystemExit(f"model snapshot not found at {SNAPSHOT.relative_to(ROOT).as_posix()}")
 
@@ -786,4 +821,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # UTF-8 out, so an em dash prints on a Windows console's code page too (Book D45).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     sys.exit(main())

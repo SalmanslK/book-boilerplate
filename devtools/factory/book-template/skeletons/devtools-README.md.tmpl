@@ -17,7 +17,7 @@ branches, `[guard]`, `[commands]`, `[ai_files]`, the tracker. No tool carries a 
 
 | Script | What it does | Runs |
 |---|---|---|
-| `check-book.py` | The Book's shape: every doc has an owner row, no history inside a current statement, *Found by* words, ids defined once, size warnings; the defect ledger's Status words, found dates and classes (`[book] class_enforced_from`) | pre-commit, local CI |
+| `check-book.py` | The Book's shape: every doc has an owner row (the imported owner tables too), no history inside a current statement, ids defined once, size warnings; the defect ledger's Status words, found dates, and Type and Source (`[book] type_source_from`) | pre-commit, local CI |
 | `check-rules.py` | Every *[enforced]* marker names an enforcer that exists, and the table below is current (`--write` rewrites it) | pre-commit, local CI |
 | `gen-task-rollup.py` | Writes `docs/project.md`'s *Task progress*, *Open tasks* and *Delivery pace* from each plan's Tasks; `--check` fails when stale | pre-commit, local CI |
 | `check-protected-paths.py` | Refuses a change to an existing `requirements/` snapshot or a generated document (`[guard]`) | pre-commit (`--staged`), local CI |
@@ -117,7 +117,7 @@ Python code rules and test-result check), `deploy` (the DEV/QA deploy skill and 
 ## Private settings
 
 **A person's own settings live outside every repository**, in their private settings file —
-`~/.{{slug}}/local.toml`, or wherever `{{env_prefix}}LOCAL_SETTINGS` points. The rule, and why: [`CLAUDE.md`](../CLAUDE.md#private-settings). A
+`~/.{{slug}}/local.toml`, or wherever `{{env_prefix}}LOCAL_SETTINGS` points. The rule, and why: [the Book's rules](../.claude/book/rules.md#private-settings). A
 session never reads it (the guard refuses); the tooling reads only these keys:
 
 | Key | Read by | What |

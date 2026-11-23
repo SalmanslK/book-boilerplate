@@ -1,0 +1,144 @@
+# The Book's defaults for the dotnet pack: the guard's migration and settings rules, the C# code rules, check-dotnet.py's defaults and the review dimensions B1-B11. Read after book-defaults.toml when
+# `[book] stack` or `[book] packs` names dotnet. The Book's file, like book-defaults.toml: change a value in
+# factory.toml (an `allowed` entry under a rule's id, say), never here.
+
+[guard]
+applied_reason = "is a migration already on the base branch. Never edit an applied migration; add a new one."
+never_by_hand_reason = "is written by `dotnet ef migrations add`, never by hand."
+ask_except = ["devtools/checks/api_contracts_postman.py"]
+dotnet_ef = true
+appsettings_secrets = true
+
+[guard.generated]
+"docs/api/api-contracts.md" = "python3 devtools/checks/gen-api-contracts.py"
+"docs/database-erd.md" = "python3 devtools/checks/gen-database-erd.py"
+
+[ai_files]
+except = ["devtools/checks/api_contracts_postman.py"]
+
+# [[code_rules]] - the C# forms of rules every stack can keep (check-code-rules.py). The names (IEmailSender,
+# IFileStore, the folders) are a starting point: a project sets its own in factory.toml, by the rule's id.
+# [[code_rules]] - the dotnet pack: the C# forms of rules every stack can keep (check-code-rules.py).
+# The names (IEmailSender, IFileStore, the folders) are a starting point: set them to the project's own.
+# An `allowed` entry is a place the project keeps on purpose, with its count and its reason.
+
+[[code_rules]]
+id = "anonymous-route"
+pattern = '\.AllowAnonymous\(\)'
+files = ["src/**/*.cs"]
+exempt = []
+skip_lines = '^\s*(?://|/?\*)'
+# Every route that opts out of sign-in, file by file: `{ file = "...", count = n, reason = "..." }`.
+allowed = []
+message = "a minimal-API route open without sign-in (an [AllowAnonymous] attribute is not matched) is on the allow-list with its reason, or it requires a permission (src/CLAUDE.md, Behaviour: authorization is default-deny)."
+
+[[code_rules]]
+id = "handler-side-effect"
+pattern = '\b(?:IEmailSender|HttpClient|IHttpClientFactory|IFileStore)\b'
+files = ["src/**/EventHandlers/**/*.cs", "src/**/*EventHandler.cs"]
+exempt = []
+skip_lines = '^\s*(?://|/?\*)'
+allowed = []
+message = "an event handler sends nothing outside the database; the outbox delivers after the commit (src/CLAUDE.md, Behaviour: no external side effect in a domain event handler; email goes through the outbox)."
+
+[[code_rules]]
+id = "config-by-literal"
+pattern = '\b_?[Cc]onfig(?:uration)?\[\s*"|\.GetValue<[^>]*>\(\s*"|\.GetSection\(\s*"|\.GetConnectionString\(\s*"'
+files = ["src/**/*.cs"]
+exempt = []
+skip_lines = '^\s*(?://|/?\*)'
+# The reads that run before options exist (registration time), file by file, with their reason.
+allowed = []
+message = "read settings through a bound, validated options class, never by a string key (src/CLAUDE.md, Structure: no magic-string configuration reads)."
+
+[[code_rules]]
+id = "pending-model-test"
+pattern = '\.HasPendingModelChanges\(\)'
+files = ["tests/**/*.cs"]
+exempt = []
+skip_lines = '^\s*(?://|/?\*)'
+require = 1
+# Judged once the project has a migration.
+require_when = ["src/**/Migrations/*.cs"]
+message = "a test must fail when the EF model has changes no migration holds: assert `context.Database.HasPendingModelChanges()` is false (the Persistence project's CLAUDE.md, Schema changes)."
+
+# check-dotnet.py - the checks that need C#'s shape, not one line: a validator per list of references,
+# options validated on start with a validator behind them, and the shape of a unique index.
+[dotnet_checks]
+# The property every tenant-scoped entity carries; a unique index on such an entity leads with it.
+# Empty: that leg is not judged, and the check says so.
+tenant_key = ""
+# The column a soft-deletable entity maps; its unique indexes filter on "<column> IS NULL".
+soft_delete_column = "deleted_at"
+# Options classes registered without a validator on purpose: { type = "...", reason = "..." }.
+options_unvalidated = []
+# Unique indexes kept global or unfiltered on purpose: { index = "Entity(Column, ...)", reason = "..." }.
+unique_indexes = []
+# Request lists that may hold a null on purpose: { property = "Request.Property", reason = "..." }.
+list_items_nullable = []
+
+# The dotnet pack's review dimensions: one file per dimension, B1-B11 (checks 16-161), in place of the
+# plugin's core B0 file; the files are the project's, in .claude/review/.
+[review_scope]
+folder = ".claude/review"
+always = ["book:peer-review/references/review-method.md", "book:peer-review/references/review-pass-a.md"]
+
+[review_scope.dimensions]
+B1 = "review-b1-architecture.md"
+B2 = "review-b2-code-quality.md"
+B3 = "review-b3-api.md"
+B4 = "review-b4-security.md"
+B5 = "review-b5-data.md"
+B6 = "review-b6-performance.md"
+B7 = "review-b7-async.md"
+B8 = "review-b8-error-handling.md"
+B9 = "review-b9-testing.md"
+B10 = "review-b10-observability.md"
+B11 = "review-b11-configuration.md"
+
+[[review_scope.rows]]
+row = "Product code under `src/`"
+match = ["src/*"]
+not_applicable = []
+
+[[review_scope.rows]]
+row = "Tests only"
+match = ["tests/*"]
+not_applicable = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"]
+
+[[review_scope.rows]]
+row = "Docs only (`docs/`, other `*.md`)"
+match = ["docs/*", "*.md"]
+not_applicable = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11"]
+
+[[review_scope.rows]]
+row = "Tooling (`devtools/`, `.claude/`, `.githooks/`, CI)"
+match = ["devtools/*", ".claude/*", ".githooks/*", "bitbucket-pipelines.yml"]
+# B1 (the .NET layers), B3 (HTTP endpoints) and B5 (EF Core and the database) check what tooling
+# does not contain. B6 stays: the guard runs on every tool call, so its cost matters.
+not_applicable = ["B1", "B3", "B5"]
+
+[[review_scope.rows]]
+row = "A `CLAUDE.md` (root or nested)"
+match = ["CLAUDE.md", "*/CLAUDE.md"]
+not_applicable = []
+
+[[review_scope.rows]]
+row = "`requirements/**`"
+match = ["requirements/*"]
+not_applicable = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11"]
+
+[[review_scope.rows]]
+row = "Generated files: the API contracts, the database ERD, a migration's `.Designer.cs`, the model snapshot"
+match = ["docs/api/api-contracts.md", "docs/database-erd.md", "*.Designer.cs", "*ModelSnapshot.cs"]
+not_applicable = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11"]
+
+# ci-daily.sh: the nightly run's throwaway PostgreSQL database.
+[ci_daily]
+test_database = "app_tests"
+
+# gen-database-erd.py: a module's heading where splitting its name is wrong (`SemenCodes = "Semen codes"`), and
+# sentences the project adds under its Tenancy, scoping and auditing section.
+[database_erd]
+titles = {}
+notes = []

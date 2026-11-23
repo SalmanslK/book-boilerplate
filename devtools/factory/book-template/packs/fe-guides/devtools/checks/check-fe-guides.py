@@ -41,6 +41,12 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+# The settings: factory.toml merged over the Book's defaults (devtools/factory/book_config.py).
+_FACTORY = next((p / "devtools" / "factory" for p in Path(__file__).resolve().parents
+                 if (p / "devtools" / "factory" / "book_config.py").is_file()), None)
+if _FACTORY is not None:
+    sys.path.insert(0, str(_FACTORY))
+import book_config  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS = "docs/api/api-contracts.md"
@@ -236,9 +242,9 @@ def configured_owners(root: Path) -> dict[str, list[str]]:
     if not path.is_file():
         return {}
     try:
-        section = tomllib.loads(path.read_text(encoding="utf-8")).get("fe_guides") or {}
-    except tomllib.TOMLDecodeError as error:
-        raise CouldNotCheck(f"{FACTORY_TOML} is not valid TOML ({error})") from error
+        section = book_config.load(root).get("fe_guides") or {}
+    except book_config.ConfigError as error:
+        raise CouldNotCheck(str(error)) from error
     return owners_from(section)
 
 

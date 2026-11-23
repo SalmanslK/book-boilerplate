@@ -24,7 +24,7 @@ layering, port placement, keys, results, folder layout — come from
 > stops someone re-introducing the old design, add one *Why:* sentence. The story
 > goes in the commit message; build history goes to
 > [`../archive/plans-history.md`](../archive/plans-history.md). Rules:
-> [`../CLAUDE.md`](../CLAUDE.md#current-state-not-history).
+> [`../CLAUDE.md`](../../.claude/book/docs.md#current-state-not-history).
 
 ---
 

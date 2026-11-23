@@ -22,14 +22,18 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+# The settings: factory.toml merged over the Book's defaults (devtools/factory/book_config.py).
+_FACTORY = next((p / "devtools" / "factory" for p in Path(__file__).resolve().parents
+                 if (p / "devtools" / "factory" / "book_config.py").is_file()), None)
+if _FACTORY is not None:
+    sys.path.insert(0, str(_FACTORY))
+import book_config  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 def configured_base(root: Path) -> str:
     """`base_ref` in devtools/factory/factory.toml (origin/dev when it names none): the branch work merges into."""
     try:
-        import tomllib
-        with open(root / "devtools" / "factory" / "factory.toml", "rb") as handle:
-            return str(tomllib.load(handle).get("base_ref") or "origin/dev")
+        return str(book_config.load(root).get("base_ref") or "origin/dev")
     except (OSError, ImportError, ValueError):
         return "origin/dev"
 
@@ -38,9 +42,7 @@ DEV = configured_base(ROOT)
 MERGED = re.compile(r"^Merged in (?P<branch>\S+) \(pull request #(?P<pr>\d+)\)")
 def _jira_key() -> str:
     try:
-        import tomllib
-        with open(ROOT / "devtools" / "factory" / "factory.toml", "rb") as handle:
-            return str((tomllib.load(handle).get("jira") or {}).get("project") or "")
+        return str((book_config.load(ROOT).get("jira") or {}).get("project") or "")
     except (OSError, ImportError, ValueError):
         return ""
 
@@ -139,4 +141,8 @@ def plain_pr(row: dict[str, str]) -> str | None:
 
 
 if __name__ == "__main__":
+    # UTF-8 out, so an em dash prints on a Windows console's code page too (Book D45).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     raise SystemExit(main())

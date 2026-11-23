@@ -1,10 +1,10 @@
 Master index of every requirements source under this folder.
 
 Purpose: a single place to enumerate everything that could go stale, for a human or a skill
-(`/requirements-check all`) to walk - and the ONE place every live link is kept (LINKS, below). Each
+(`/book:check-sources all`) to walk - and the ONE place every live link is kept (LINKS, below). Each
 folder's read-me.txt keeps only its versioning rule and its "Last checked" line.
 
-This folder is READ-ONLY for everyone except the requirements-check skill: a file that is already
+This folder is READ-ONLY for everyone except the book:check-sources skill: a file that is already
 here is never edited. A new capture is a new file.
 
 Format per entry: local path -> what it is -> versioning.

@@ -1,0 +1,39 @@
+# The Book's defaults for the deploy pack: what every DEV/QA deploy does the same way. Read after book-defaults.toml when
+# `[book] packs` names deploy. The Book's file, like book-defaults.toml: change a value in factory.toml,
+# never here.
+
+# `book deploy` (devtools/factory/deploy.py) and /book:deploy. The host, its paths and its accounts are the
+# project's own, in factory.toml [deploy]. DEV and QA only: the guard refuses a deploy that names anything
+# else, in its own code - no setting here or in factory.toml can widen it.
+[deploy]
+backup_environments = ["dev", "qa"]
+min_free_gb = 10
+bind_mounts = []
+volumes = []
+settings_check = "devtools/checks/check-required-settings.sh"
+gate_filter = "Category!=Smoke"
+smoke_filter = "Category=Smoke"
+# The only reasons a smoke test may skip, by the start of its message; any other skip fails the run. A
+# project adds its own reasons in factory.toml [deploy.smoke_skip_reasons]: the table merges per key.
+smoke_skip_reasons = { "No deployed API" = "URL not set", "No account to log in as" = "no credentials" }
+smoke_pairs = []
+# The project's deployment plan and the Book's last audit record, which /book:deploy names; empty: none yet.
+runbook = ""
+audit_record = ""
+# check-compose.py: a placeholder value for each variable the project's Compose files require that the Book's
+# own list does not hold, by name; never a real secret.
+compose_placeholders = {}
+
+[deploy.DEV]
+compose_files = ["compose.yaml", "compose.dev.yaml"]
+profile = ""
+settings_environment = "Development"
+api_port = 0
+public_url = ""
+
+[deploy.QA]
+compose_files = ["compose.yaml", "compose.qa.yaml"]
+profile = ""
+settings_environment = "QA"
+api_port = 0
+public_url = ""

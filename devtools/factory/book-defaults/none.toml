@@ -1,0 +1,22 @@
+# The Book's defaults for a stack-free Book (`[book] stack = "none"`): the core review dimensions. The Book's
+# file, like book-defaults.toml: change a value in factory.toml, never here.
+
+# `book review-scope`: which parts of the review checklist a change needs read (book:self-review,
+# book:peer-review). One stack-free file, B0 (checks 16-161), in the book plugin (`book:` paths). Rows place a
+# path; a dimension a matched row lists as not applicable is left out.
+[review_scope]
+folder = ".claude/review"
+always = ["book:peer-review/references/review-method.md", "book:peer-review/references/review-pass-a.md"]
+
+[review_scope.dimensions]
+B0 = "book:peer-review/references/review-b-core.md"
+
+[[review_scope.rows]]
+row = "Docs only (`docs/`, other `*.md`)"
+match = ["docs/*", "*.md"]
+not_applicable = ["B0"]
+
+[[review_scope.rows]]
+row = "`requirements/**`"
+match = ["requirements/*"]
+not_applicable = ["B0"]

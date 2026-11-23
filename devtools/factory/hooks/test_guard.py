@@ -15,6 +15,7 @@ import fnmatch
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -238,6 +239,34 @@ class ShellTests(unittest.TestCase):
         ("delete a remote branch by flag", "git push --delete origin feature/x", {("branch-delete", guard.DENY)}),
         ("push --all", "git push --all origin", {("push-protected-branch", guard.DENY)}),
         ("delete a local branch", "git branch -D feature/x", {("branch-delete", guard.DENY)}),
+        # git takes any unambiguous prefix of a long flag, and short flags written together (Book D53).
+        ("delete by a prefix of --delete", "git push origin --de feature/x", {("branch-delete", guard.DENY)}),
+        ("delete by -fd", "git push -fd origin feature/x", {("branch-delete", guard.DENY), ("force-push", guard.ASK)}),
+        ("force by -uf", "git push -uf origin feature/x", {("force-push", guard.ASK)}),
+        ("force by a prefix of --force-with-lease", "git push --force-w origin feature/x", {("force-push", guard.ASK)}),
+        ("force by --forc", "git push --forc origin feature/x", {("force-push", guard.ASK)}),
+        ("every branch by --al", "git push --al origin", {("push-protected-branch", guard.DENY)}),
+        ("mirror by --mirro", "git push --mirro origin", {("push-protected-branch", guard.DENY)}),
+        ("force by +refspec with a destination", "git push origin +feature/x:refs/heads/feature/y",
+         {("force-push", guard.ASK)}),
+        ("--dry-run is no delete", "git push --dry-run origin feature/x", set()),
+        ("--follow-tags is no force", "git push --follow-tags origin feature/x", set()),
+        ("-uv is no force", "git push -uv origin feature/x", set()),
+        ("a push option holding an f", "git push -ofast origin feature/x", set()),
+        ("--force-if-includes alone is no force", "git push --force-if-includes origin feature/x", set()),
+        # Local branch moves and deletes past `git branch -d` (Book D54).
+        ("update-ref deletes a branch", "git update-ref -d refs/heads/feature/x", {("branch-delete", guard.DENY)}),
+        ("update-ref moves dev", "git update-ref refs/heads/dev HEAD", {("move-protected-branch", guard.DENY)}),
+        ("update-ref moves a work branch", "git update-ref refs/heads/feature/x HEAD", set()),
+        ("update-ref deletes a notes ref, not a branch", "git update-ref -d refs/notes/x", set()),
+        ("branch -f onto dev", "git branch -f dev feature/x", {("move-protected-branch", guard.DENY)}),
+        ("branch --force onto main", "git branch --force main feature/x", {("move-protected-branch", guard.DENY)}),
+        ("branch -f a work branch from dev", "git branch -f feature/x dev", set()),
+        ("branch -M onto dev", "git branch -M feature/x dev", {("move-protected-branch", guard.DENY)}),
+        ("branch -m dev away", "git branch -m dev old-dev", {("move-protected-branch", guard.DENY)}),
+        ("branch -m the current branch to qa", "git branch -m qa", {("move-protected-branch", guard.DENY)}),
+        ("branch -m a work branch", "git branch -m feature/x feature/y", set()),
+        ("branch -c onto main", "git branch -c feature/x main", {("move-protected-branch", guard.DENY)}),
         ("list branches", "git branch -vv", set()),
         # A branch that tracks dev lets a plain push land on dev (CLAUDE.md, Branches).
         ("checkout -b from origin/dev", "git checkout -b fix/x origin/dev", {("branch-tracks-protected", guard.DENY)}),
@@ -394,6 +423,18 @@ class ShellTests(unittest.TestCase):
          "python -c \"import runpy; runpy.run_path('devtools/book.py', run_name='__main__')\" deploy up --env QA", set()),
         ("python -c running another script", "python -c \"import runpy; runpy.run_path('tools/x.py')\" deploy --env UAT",
          set()),
+        # Any code that names the script runs it, however it does (Book D55).
+        ("book deploy through exec(open(...))",
+         "python -c \"exec(open('devtools/book.py').read())\" book deploy check --env PROD",
+         {("deploy-non-dev", guard.DENY)}),
+        ("factory.py through exec, run together with -c",
+         "python3 \"-cexec(open('devtools/factory/factory.py').read())\" book deploy up --env UAT",
+         {("deploy-non-dev", guard.DENY)}),
+        ("exec of book.py through uv run",
+         "uv run python -c \"exec(open('devtools/book.py').read())\" deploy check --env PROD",
+         {("deploy-non-dev", guard.DENY)}),
+        ("exec of book.py, to QA", "python -c \"exec(open('devtools/book.py').read())\" deploy check --env QA", set()),
+        ("exec of notebook.py", "python -c \"exec(open('tools/notebook.py').read())\" deploy --env UAT", set()),
         ("another module's deploy step", "python -m notebook deploy --env UAT", set()),
         ("another module, the word book after it", "python -m tools.report book deploy --env UAT", set()),
         ("a script given the word book", "python tools/run.py book deploy --env UAT", set()),
@@ -843,6 +884,9 @@ class EndToEndTests(unittest.TestCase):
             handle.write(script)
         with open(os.path.join(cls.copy, "factory.toml"), "w", encoding="utf-8") as handle:
             handle.write(GUARD_RULES)
+        # The settings loader the guard merges the Book's defaults with, beside factory.toml as in a Book.
+        shutil.copy(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "book_config.py"),
+                    cls.copy)
 
     def run_guard(self, payload: dict, mode: str) -> tuple[int, str]:
         env = {**os.environ, "FACTORY_GUARD_MODE": mode}
@@ -2408,6 +2452,81 @@ class BannedToolTests(unittest.TestCase):
             self.assertEqual(rules(shell_call("pip install graphify")), set())
         finally:
             guard._RULES.clear()
+
+
+class MergedSettings(unittest.TestCase):
+    """The guard's rules are factory.toml over the Book's defaults beside it, and it judges nothing on a broken one."""
+
+    def setUp(self):
+        self.saved = guard.FACTORY_CONFIG
+        self.folder = tempfile.mkdtemp(prefix="guard-test-merged-")
+        guard.FACTORY_CONFIG = os.path.join(self.folder, "factory.toml")
+        self.write("factory.toml", 'base_ref = "origin/dev"\n[guard]\nread_only = ["contracts/**"]\n')
+        guard._RULES.clear()
+
+    def tearDown(self):
+        guard.FACTORY_CONFIG = self.saved
+        guard._RULES.clear()
+
+    def write(self, name: str, text: str, mode: str = "w") -> None:
+        with open(os.path.join(self.folder, name), mode, encoding="utf-8") as handle:
+            handle.write(text)
+
+    def test_the_defaults_fill_what_the_project_leaves_out(self):
+        self.write("book-defaults.toml", '[guard]\nread_only = ["requirements/**"]\nask = ["CLAUDE.md"]\n'
+                                         'non_dev_targets = ["prod"]\n')
+        rules = guard.rules()
+        self.assertEqual(rules.read_only, ("contracts/**",), "the project's own list wins")
+        self.assertEqual(rules.ask, ("CLAUDE.md",))
+        self.assertTrue(rules.non_dev_target.search("deploy prod"))
+
+    def test_extend_adds_to_a_default_list(self):
+        self.write("book-defaults.toml", '[guard]\nask = ["CLAUDE.md"]\n')
+        self.write("factory.toml", '[extend.guard]\nask = ["tools/**"]\n', "a")
+        self.assertEqual(guard.rules().ask, ("CLAUDE.md", "tools/**"))
+
+    def test_a_stack_layer_is_read_after_the_core_one(self):
+        self.write("factory.toml", '[book]\nstack = "dotnet"\n', "a")
+        self.write("book-defaults.toml", '[guard]\ndotnet_ef = false\n')
+        os.makedirs(os.path.join(self.folder, "book-defaults"))
+        self.write(os.path.join("book-defaults", "dotnet.toml"), '[guard]\ndotnet_ef = true\n')
+        self.assertTrue(guard.rules().dotnet_ef)
+
+    def test_a_broken_defaults_file_leaves_the_guard_unable_to_judge(self):
+        self.write("book-defaults.toml", "[guard\n")
+        with self.assertRaises(guard.RulesUnavailable):
+            guard.rules()
+
+    def test_a_1_6_book_with_its_defaults_file_deleted_is_refused_not_emptied(self):
+        # The guard would otherwise run with empty read-only and ask lists (Book D63).
+        self.write("factory.toml", '[book]\nbook_version = "1.6.0"\n', "a")
+        with self.assertRaises(guard.RulesUnavailable) as caught:
+            guard.rules()
+        # The refusal names the missing file and how to restore it (Book D72).
+        self.assertIn("devtools/factory/book-defaults.toml is missing", str(caught.exception))
+        self.assertIn("outside this session (`git checkout -- <file>`)", str(caught.exception))
+        self.write("book-defaults.toml", '[guard]\nask = ["CLAUDE.md"]\n')
+        guard._RULES.clear()
+        self.assertEqual(guard.rules().ask, ("CLAUDE.md",))
+
+    def test_declining_the_defaults_file_does_not_empty_the_guard(self):
+        # Book D71: `[book] declined` naming it once made its absence acceptable, and the lists empty.
+        self.write("factory.toml", '[book]\nbook_version = "1.6.0"\n'
+                   'declined = ["devtools/factory/book-defaults.toml"]\n', "a")
+        with self.assertRaises(guard.RulesUnavailable):
+            guard.rules()
+
+    def test_a_defaults_file_the_lock_records_is_needed_too(self):
+        self.write("book-files.lock", '[files]\n"devtools/factory/book-defaults.toml" = "0"\n')
+        with self.assertRaises(guard.RulesUnavailable):
+            guard.rules()
+
+    def test_no_setting_lets_a_deploy_reach_past_qa(self):
+        """DEV and QA are the guard's own: a project's settings add refusals, never another environment."""
+        self.write("book-defaults.toml", '[guard]\nnon_dev_targets = []\n')
+        guard.rules()
+        self.assertNotIn(guard.factory_deploy_target("python", ["devtools/book.py", "deploy", "--env", "UAT"]),
+                         (None, "DEV", "QA"))
 
 
 if __name__ == "__main__":

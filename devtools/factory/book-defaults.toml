@@ -1,0 +1,149 @@
+# The Book's defaults for every Book: what devtools/factory/factory.toml need not say. Read through
+# book_config.py, with the installed stack's and packs' defaults (book-defaults/<pack>.toml) and then the
+# project's own factory.toml over them: tables merge per key, a list the project sets replaces the default
+# (add to one with `[extend.<table>] <key> = [...]`), and [[code_rules]] merge by id.
+#
+# This file is the Book's: `book upgrade` replaces it, and check-book fails when a project's copy differs. Put
+# a different value in factory.toml instead.
+
+[book]
+# Other names that are the project's own, never reported as another project's leftovers (`book verify`).
+aliases = []
+# Template files the project chose not to carry, because its own file does the job: `book upgrade` reports
+# each DECLINED and never writes it, and the drift check leaves it out.
+declined = []
+# Book-owned files the project still holds changed, each { file = "...", reason = "..." }, until the change
+# moves into a setting or the project's own file: check-book lists them rather than fail.
+drift_accepted = []
+# The columns of project.md Part 1's phase tables, in order; an optional one may be absent.
+phase_columns = ["Feature", "Plan", "FE guide", "Status", "Owner", "Depends on"]
+optional_phase_columns = []
+# A plan's Status line is derived from its Tasks and checked (gen-task-rollup.py). A Book adopted from plans
+# whose statuses disagree with their tasks may set false (a warning only) until they agree.
+derived_status_enforced = true
+# The job roles a task row may name, and the one this repository builds (its tasks drive a plan's status).
+roles = ["BE", "FE", "QA", "BA", "DevOps"]
+our_role = "BE"
+# The heading an open question's suggested answer carries in open-questions.md.
+recommendation_heading = "**Recommendation:**"
+# A live document over this many lines is named, as a warning (check-book.py).
+size_warning = 1500
+# The day a Book took the defects' Type and Source columns (check-book.py): an open row found on or after it
+# with no Type or Source fails, an older one is warned of until `book defects classify` proposes them. The
+# default holds every dated row to them; `book upgrade` to 1.6 writes the upgrade's day into the project.
+type_source_from = "1970-01-01"
+# A pack's optional documents this project does not keep (`["docs/ui-standard.md"]`): verify and the upgrade
+# stop asking for them.
+skip_skeletons = []
+
+# What hooks/guard.py refuses or asks about in every Claude Code session. Paths are case-insensitive globs
+# from the repository root; `**` spans folders. The deploy guard's DEV/QA-only rule is the guard's own code,
+# never a setting: these words only add refusals.
+[guard]
+# Change an existing file: refused. Add a new one: allowed. `maintained` files may change.
+read_only = ["requirements/**"]
+# The trackers keep their current copy at a plain filename; add each one's exact path.
+read_only_maintained = ["requirements/read-me.txt", "requirements/**/read-me.txt"]
+read_only_reason = "is a snapshot of a client document and is read-only. Only /book:check-sources adds to requirements/, as a new file."
+# Files already on the base branch that are never changed, and files only a tool writes.
+applied = []
+applied_reason = "is already on the base branch. Never change it; add a new one."
+never_by_hand = []
+never_by_hand_reason = "is written by a tool, never by hand."
+# Writes a person confirms: the files that steer the AI - the same paths as [ai_files].
+ask = ["CLAUDE.md", "**/CLAUDE.md", "AGENTS.md", "AI-DEVELOPMENT-GUIDE.md",
+       ".claude/**", ".cursor/**", ".githooks/**", "bitbucket-pipelines.yml",
+       "devtools/factory/**", "devtools/checks/**"]
+ask_except = []
+# Words that are never DEV or QA: a deploy or a command naming one is refused as well.
+non_dev_targets = ["uat", "prod", "production", "preprod", "staging"]
+dotnet_ef = false
+appsettings_secrets = false
+# Home folders of shared service accounts, not of a person.
+service_accounts = []
+# Snapshots rewritten in place before the rule said never, each { commit = "<sha>", path = "...",
+# reason = "..." }: check-protected-paths excuses that one change, so a promotion can carry it.
+accepted_rewrites = []
+# Google Drive: a Drive connector's MCP tool is refused unless its own name starts with a read verb; an
+# rclone command that deletes on a remote is refused.
+drive_connector = '(?i)^mcp__.*drive'
+drive_read_verbs = ["read", "search", "list", "get", "fetch", "download", "export", "find"]
+rclone_deleting = ["delete", "deletefile", "purge", "rmdir", "rmdirs", "cleanup", "dedupe", "sync", "bisync"]
+drive_reason = "A session never creates, moves or deletes on Google Drive; the FE guides reach it only through /book:publish-guides."
+
+# Generated documents: path = the command that writes them (a stack pack adds its own).
+[guard.generated]
+
+[requirements]
+id_prefix = "FSD"
+traceability = "docs/Audit/spec-traceability.md"
+
+# `book fsd-threads`: the live FSD Doc against the last check. The Doc's link is the line of `links_file`
+# starting with `fsd_link_label`; the last check is recorded in `live_check_record`. The credential is a
+# person's: `live_credential` lives in their private settings file.
+[requirements.sources]
+fsd_dir = "requirements/fsd"
+live_check_record = "requirements/fsd/read-me.txt"
+links_file = "requirements/read-me.txt"
+fsd_link_label = "FSD"
+# Other snapshot folders besides fsd_dir, each required to hold "<Name> - V<n>.<ext>" files (`book verify`,
+# N14) - for example "requirements/permissions-matrix".
+snapshot_dirs = []
+out_of_scope = []
+
+# `book requirements status`: the folder under requirements/ that holds each LINKS line's snapshots.
+[requirements.sources.folders]
+"FSD" = "fsd"
+
+# What ci-local.sh, check-rules.py (the `tests` enforcer) and the deploy gate run. An empty command is
+# reported N/A, never OK.
+[commands]
+build = ""
+test = ""
+integration = ""
+# The folder of the integration tests (tests/App.IntegrationTests), and the filter for their in-process half.
+integration_project = ""
+integration_filter = ""
+self_tests = ["devtools/factory/hooks", "devtools/factory", "devtools/checks"]
+
+[checks]
+# A fix commit's id: a defect or question id; the [jira] project key is added when set.
+fix_id = '\b[DQ]\d+\b'
+# The CI files check-rules.py and check-pipeline.py read.
+ci_files = []
+
+# A pull request that changes one passes `book ai-files` only when an owner made it, or an owner approved it
+# after its latest commit. The owners are the project's: [ai_files] owners in factory.toml.
+[ai_files]
+paths = [
+  "CLAUDE.md", "**/CLAUDE.md", "AGENTS.md", "AI-DEVELOPMENT-GUIDE.md",
+  ".claude/**", ".cursor/**", ".githooks/**", "bitbucket-pipelines.yml",
+  "devtools/factory/**", "devtools/checks/**",
+]
+except = []
+
+# What `book protection --check` holds the live branch restrictions to (the branches are the project's).
+[protection]
+kinds = ["delete", "force", "push"]
+
+[protection.minimums]
+require_approvals_to_merge = 1
+require_passing_builds_to_merge = 1
+
+# While CI is switched off, devtools/checks/ci-local.sh is the gate before a pull request.
+[local_ci]
+required = true
+
+# [[code_rules]] (check-code-rules.py): a pattern refused where it is written, or allowed only where `allowed`
+# lists it with a reason. A project adds its `allowed` entries under the same id in its own factory.toml; a
+# stack's defaults add the stack's rules. A project switches one off with its id and `enabled = false`.
+[[code_rules]]
+id = "data-script-ddl"
+# Schema comes from migrations only; a data script creates no table, index, view or type. A TEMP table
+# (CREATE TEMP TABLE) is a script's own scratch space and never matches.
+pattern = '(?i)\b(?:CREATE|ALTER|DROP)\s+(?:OR\s+REPLACE\s+)?(?:UNIQUE\s+|UNLOGGED\s+)?(?:TABLE|INDEX|VIEW|MATERIALIZED\s+VIEW|SCHEMA|SEQUENCE|TYPE|DOMAIN|EXTENSION|FUNCTION|PROCEDURE|TRIGGER)\b'
+files = ["database-scripts/**/*.sql"]
+exempt = []
+skip_lines = '^\s*--'
+allowed = []
+message = "a data script never changes the schema; that is a migration's job (CLAUDE.md, Layout: database-scripts/ holds no schema). A sequence reset (ALTER SEQUENCE … RESTART) a seed script needs is an `allowed` entry with its reason."

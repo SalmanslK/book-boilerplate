@@ -1,8 +1,10 @@
 # Tests — rules for the test projects
 
-Loaded when you work under `tests/`. The root [`CLAUDE.md`](../CLAUDE.md) still
-applies, and so do the style rules in [`src/CLAUDE.md`](../src/CLAUDE.md) — test code is code; the
-reasoning is in [`docs/architecture.md` §11](../docs/architecture.md#11-testing).
+The Book's rules for this folder, the same in every project with the dotnet pack: the folder's `CLAUDE.md` imports this file and holds only the project's own beside it. **This file is the Book's** — `book upgrade` replaces it, and check-book fails when a project's copy differs.
+
+Loaded when you work under `tests/`. The root [`CLAUDE.md`](../../../CLAUDE.md) still
+applies, and so do the style rules in [`src/CLAUDE.md`](src.md) — test code is code; the
+reasoning is in [`docs/architecture.md` §11](../../../docs/architecture.md#11-testing).
 
 ## What a feature must prove
 
@@ -33,7 +35,7 @@ reasoning is in [`docs/architecture.md` §11](../docs/architecture.md#11-testing
 
 ## Choosing what to run
 
-Which tests a change needs is the rule in [`CLAUDE.md`](../CLAUDE.md#building-and-testing);
+Which tests a change needs is the rule in [`CLAUDE.md`](../../../CLAUDE.md#building-and-testing);
 this is how.
 
 - **Unit and architecture suites — always, whole:** `dotnet test tests/Boilerplate.UnitTests`
@@ -102,7 +104,7 @@ this is how.
 - Credentials come from the `BOILERPLATE_DEPLOYED_API_*` variables in the user's shell —
   never prompt for them, never print them. **Everything a run creates it deletes.**
   The variables and the rules that keep a shared host clean:
-  [`docs/dev-smoke-test-suite.md`](../docs/dev-smoke-test-suite.md) §1 and §4.
+  [`docs/dev-smoke-test-suite.md`](../../../docs/dev-smoke-test-suite.md) §1 and §4.
 - The smoke tests use none of the product's DTOs, on purpose: they parse the wire
   format, so a serialization change cannot hide behind a shared type.
 

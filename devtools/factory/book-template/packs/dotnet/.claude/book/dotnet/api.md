@@ -1,7 +1,9 @@
 # API — endpoint rules
 
+The Book's rules for this folder, the same in every project with the dotnet pack: the folder's `CLAUDE.md` imports this file and holds only the project's own beside it. **This file is the Book's** — `book upgrade` replaces it, and check-book fails when a project's copy differs.
+
 Loaded when you work under `src/Boilerplate.API/`. The root
-[`CLAUDE.md`](../../CLAUDE.md) still applies.
+[`CLAUDE.md`](../../../CLAUDE.md) still applies.
 
 ## Endpoints
 
@@ -38,7 +40,7 @@ Loaded when you work under `src/Boilerplate.API/`. The root
    generator refuses to run until every route is placed, and fails on a sample field
    the model does not declare.
 3. **Update the module's FE integration guide** in
-   [`docs/fe-integration-guides/`](../../docs/fe-integration-guides/) in the same
+   [`docs/fe-integration-guides/`](../../../docs/fe-integration-guides/) in the same
    change — including its *Deviations* section if the shape differs from
    `requirements/fe-api-contracts/`. A rule that applies to every endpoint goes in
    `api-conventions.md`, never in a module guide.
@@ -46,14 +48,14 @@ Loaded when you work under `src/Boilerplate.API/`. The root
 ## Settings
 
 - A setting the API itself consumes is bound in `Configuration/Options/` and validated
-  with `ValidateOnStart` ([the rule](../CLAUDE.md)). Never read configuration with a magic string.
+  with `ValidateOnStart` ([the rule](src.md)). Never read configuration with a magic string.
 - `appsettings.json` and `appsettings.<Env>.json` hold **placeholders that start with
   `REPLACE`** — startup validation refuses to boot outside Development on that prefix.
   `devtools/checks/check-appsettings-secrets.sh` enforces no real secrets
   *[enforced: `check-appsettings-secrets.sh`, pre-commit + CI]*. `appsettings.Development.json` is tracked and checked like the rest:
   put nothing in it you would not publish.
 - A new setting an environment must supply also needs the Compose overlay and the
-  server `.env` — see [Deploying in the root file](../../CLAUDE.md#deploying).
+  server `.env` — see [Deploying in the root file](../../../CLAUDE.md#deploying).
 
 ## Settings an environment supplies
 

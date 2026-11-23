@@ -43,7 +43,8 @@ The output names which copy judged.
     python devtools/checks/check-protected-paths.py [--base origin/dev] [--head HEAD]
 
 A change already in dev's history from before this check existed cannot be removed without rewriting
-history; ACCEPTED, below, excuses it by its full commit and path, so the promotions that carry it pass —
+history; `[guard] accepted_rewrites` in factory.toml (as the base holds it) excuses it by its full commit and
+path, so the promotions that carry it pass —
 only while the head still holds exactly what that commit wrote, and every other commit in the range that
 touched the path is a merge that kept one parent's existing copy.
 
@@ -58,6 +59,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import re
 import subprocess
 import sys
 import tomllib
@@ -68,14 +70,18 @@ sys.path.insert(0, str(ROOT / "devtools" / "factory" / "hooks"))
 import guard  # noqa: E402 — the guard's glob semantics, so a pattern means the same thing in both
 sys.path.insert(0, str(ROOT / "devtools" / "factory"))
 import snapshots  # noqa: E402 — the requirements index and the weekly rule, read as factory reads them
+# The settings: factory.toml merged over the Book's defaults (devtools/factory/book_config.py).
+_FACTORY = next((p / "devtools" / "factory" for p in Path(__file__).resolve().parents
+                 if (p / "devtools" / "factory" / "book_config.py").is_file()), None)
+if _FACTORY is not None:
+    sys.path.insert(0, str(_FACTORY))
+import book_config  # noqa: E402
 
 FACTORY_TOML = "devtools/factory/factory.toml"
 def configured_base(root: Path) -> str:
     """`base_ref` in devtools/factory/factory.toml (origin/dev when it names none): the branch work merges into."""
     try:
-        import tomllib
-        with open(root / "devtools" / "factory" / "factory.toml", "rb") as handle:
-            return str(tomllib.load(handle).get("base_ref") or "origin/dev")
+        return str(book_config.load(root).get("base_ref") or "origin/dev")
     except (OSError, ImportError, ValueError):
         return "origin/dev"
 
@@ -94,7 +100,9 @@ DEFAULT_LINKS = "requirements/read-me.txt"
 # Changes already in the integration branch's history that broke a rule before this check existed. History is never rewritten
 # (CLAUDE.md, Git), so a promotion carries them until every later branch holds them: each is excused by
 # its full commit and path — only that commit's change to that path; any other commit touching the file
-# is still judged. A person reviews every entry (this file is an AI file).
+# is still judged. They are the project's own, `[guard] accepted_rewrites` as the base branch holds it (a
+# pull request cannot excuse itself), so this file stays the Book's. A person reviews every entry (factory.toml
+# is an AI file).
 ACCEPTED: dict[tuple[str, str], str] = {}
 
 
@@ -121,14 +129,16 @@ def commit_of(ref: str, root: Path) -> str:
 
 
 def rules_at(commit: str, root: Path, ref: str = "") -> dict | None:
-    """`[guard]` from factory.toml as `commit` (named `ref`) holds it; None when it has no factory.toml."""
-    listed = must(git("ls-tree", "--name-only", commit, "--", FACTORY_TOML, root=root), "ls-tree")
+    """`[guard]` as `commit` (named `ref`) holds it - its factory.toml over the Book's defaults there, the staged
+    index when `commit` is "" - or None when it has no factory.toml."""
+    listed = must(git("ls-tree", "--name-only", commit, "--", FACTORY_TOML, root=root), "ls-tree") if commit \
+        else must(git("ls-files", "--", FACTORY_TOML, root=root), "ls-files")
     if not listed.strip():
         return None
-    text = must(git("show", f"{commit}:{FACTORY_TOML}", root=root), f"show {FACTORY_TOML}")
     try:
-        table = tomllib.loads(text)["guard"]
-    except (tomllib.TOMLDecodeError, KeyError, TypeError) as error:
+        config = book_config.load_at(root, commit) or {}
+        table = config["guard"]
+    except (book_config.ConfigError, KeyError, TypeError) as error:
         raise CouldNotCheck(f"no readable [guard] in {FACTORY_TOML} ({type(error).__name__})") from error
     if not isinstance(table, dict):
         raise CouldNotCheck(f"no readable [guard] in {FACTORY_TOML} (not a table)")
@@ -147,11 +157,28 @@ def rules_at(commit: str, root: Path, ref: str = "") -> dict | None:
                          ("applied_reason", "is a migration already on the destination; add a new one.")):
         rules[key] = str(table.get(key, default))
     try:
-        links = tomllib.loads(text).get("requirements", {}).get("sources", {}).get("links_file")
+        links = config.get("requirements", {}).get("sources", {}).get("links_file")
     except AttributeError:
         links = None
     rules["links_file"] = links if isinstance(links, str) and links else DEFAULT_LINKS
+    rules["accepted"] = accepted_rewrites(table.get("accepted_rewrites", []), ref or commit)
     return rules
+
+
+def accepted_rewrites(entries: object, where: str) -> dict[tuple[str, str], str]:
+    """`[guard] accepted_rewrites`: {(full commit, path): reason}, each entry named, never guessed."""
+    if not isinstance(entries, list):
+        raise CouldNotCheck(f"[guard] accepted_rewrites in {where}:{FACTORY_TOML} is not a list")
+    found: dict[tuple[str, str], str] = {}
+    for entry in entries:
+        commit, path, reason = ((entry.get(key) for key in ("commit", "path", "reason"))
+                                if isinstance(entry, dict) else (None,) * 3)
+        if not (isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40}", commit) and isinstance(path, str) and path
+                and isinstance(reason, str) and reason.strip()):
+            raise CouldNotCheck(f"[guard] accepted_rewrites in {where}:{FACTORY_TOML}: each entry is {{ commit = "
+                                f"\"<the full 40-character commit>\", path = \"...\", reason = \"...\" }} ({entry!r})")
+        found[(commit, path)] = reason.strip()
+    return found
 
 
 def changed(merge_base: str, head: str, root: Path) -> list[tuple[str, str]]:
@@ -254,9 +281,11 @@ def second_captures(changes: list[tuple[str, str]], base_commit: str, head_commi
     return snapshots.second_captures(branch, base, WEEKLY_FROM)
 
 
-def rules_for(base: str, base_commit: str, head: str, head_commit: str, root: Path) -> tuple[dict, str]:
+def rules_for(base: str, base_commit: str, head: str, head_commit: str, root: Path,
+              staged: bool = False) -> tuple[dict, str]:
     """The destination's rules; else the base branch's (`base_ref`, origin/dev by default), where the
-    reviewed rules live; else — the first landing only — the head's. Returns the rules and the ref they
+    reviewed rules live; else — the first landing only — the head's, or, before the commit that installs the
+    Book (`--staged`, in pre-commit), the staged index's (Book D59). Returns the rules and the ref they
     came from."""
     rules = rules_at(base_commit, root, base)
     if rules is not None:
@@ -270,6 +299,10 @@ def rules_for(base: str, base_commit: str, head: str, head_commit: str, root: Pa
     rules = rules_at(head_commit, root, head)
     if rules is not None:
         return rules, head
+    if staged:
+        rules = rules_at("", root, "the staged index")
+        if rules is not None:
+            return rules, "the staged index"
     raise CouldNotCheck(f"neither {base}, {reviewed_ref} nor {head} holds {FACTORY_TOML}, so there are no rules to apply")
 
 
@@ -286,7 +319,6 @@ def main(argv: list[str] | None = None, root: Path = ROOT, env: dict[str, str] |
          accepted: dict[tuple[str, str], str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     env = os.environ if env is None else env
-    accepted = ACCEPTED if accepted is None else accepted
     destination = env.get("BITBUCKET_PR_DESTINATION_BRANCH", "")
     try:
         base = option(args, "--base", f"origin/{destination}" if destination else REVIEWED)
@@ -295,7 +327,8 @@ def main(argv: list[str] | None = None, root: Path = ROOT, env: dict[str, str] |
         merge_base = git("merge-base", base_commit, head_commit, root=root)
         if merge_base.returncode != 0 or not merge_base.stdout.strip():
             raise CouldNotCheck(f"no merge base between {base} and {head} — fetch both with enough history")
-        rules, source = rules_for(base, base_commit, head, head_commit, root)
+        rules, source = rules_for(base, base_commit, head, head_commit, root, "--staged" in args)
+        accepted = {**ACCEPTED, **rules.get("accepted", {})} if accepted is None else accepted
         fork = merge_base.stdout.strip()
         changes = changed(fork, head_commit, root)
         found = [line for path, line in offences(changes, rules)
@@ -322,4 +355,8 @@ def main(argv: list[str] | None = None, root: Path = ROOT, env: dict[str, str] |
 
 
 if __name__ == "__main__":
+    # UTF-8 out, so an em dash prints on a Windows console's code page too (Book D45).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     raise SystemExit(main())

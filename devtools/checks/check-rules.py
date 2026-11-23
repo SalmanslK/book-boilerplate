@@ -8,8 +8,9 @@ where the marker says: a test class is in the test projects CI runs; a script ma
 CI file, one marked "pre-commit" is in `.githooks/pre-commit`; the guard is wired into the session
 settings and its tests run in CI.
 
-The instruction files are every tracked `CLAUDE.md` outside `devtools/factory/book-template/` (a
-pack's rules are live only once `book init` copies them). "CI" is the CI files
+The instruction files are every tracked `CLAUDE.md` and the Book's rules files they import
+(`.claude/book/`), outside `devtools/factory/book-template/` (the template's rules are live only once
+`book init` copies them). "CI" is the CI files
 (`[checks] ci_files` in devtools/factory/factory.toml) together with `devtools/checks/ci-local.sh`,
 the local run that stands in for CI while there is none; the test command CI must run is `[commands]
 test`. A marker that names nothing, or names
@@ -28,25 +29,34 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+# The settings: factory.toml merged over the Book's defaults (devtools/factory/book_config.py).
+_FACTORY = next((p / "devtools" / "factory" for p in Path(__file__).resolve().parents
+                 if (p / "devtools" / "factory" / "book_config.py").is_file()), None)
+if _FACTORY is not None:
+    sys.path.insert(0, str(_FACTORY))
+import book_config  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = "devtools/factory/book-template/"
 LOCAL_CI = "devtools/checks/ci-local.sh"
+# The Book's rules files the CLAUDE.md files import: their markers are rules like any other.
+BOOK_RULES = ".claude/book/"
 
 
 def instructions(root: Path = ROOT) -> list[str]:
-    """Every tracked CLAUDE.md, root first; the template's packs are not live rules."""
+    """Every tracked CLAUDE.md and the Book's rules files they import (.claude/book/), root first; the
+    template's packs and core are not live rules."""
     done = subprocess.run(["git", "-C", str(root), "-c", "core.quotePath=false", "ls-files"],
                           capture_output=True, text=True, encoding="utf-8")
     found = [rel for rel in done.stdout.splitlines()
-             if (rel == "CLAUDE.md" or rel.endswith("/CLAUDE.md")) and not rel.startswith(TEMPLATE)]
+             if (rel == "CLAUDE.md" or rel.endswith("/CLAUDE.md") or (rel.startswith(BOOK_RULES) and rel.endswith(".md")))
+             and not rel.startswith(TEMPLATE)]
     return sorted(found, key=lambda rel: (rel != "CLAUDE.md", rel))
 
 
 def settings(root: Path = ROOT) -> dict:
     try:
-        with open(root / "devtools" / "factory" / "factory.toml", "rb") as handle:
-            return tomllib.load(handle)
+        return book_config.load(root)
     except (OSError, ValueError):
         return {}
 
@@ -285,4 +295,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # UTF-8 out, so an em dash prints on a Windows console's code page too (Book D45).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     raise SystemExit(main())

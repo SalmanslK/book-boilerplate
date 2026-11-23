@@ -1,12 +1,11 @@
-# The Book's configuration for this repository: what the guard refuses or asks about in every Claude
-# Code session, who owns the files that steer the AI, where the tracker is, the commands the checks
-# run, and what the branch restrictions must be. Read by factory.py, hooks/guard.py and the checks.
-# A person confirms every change to this file — the guard asks.
+# The boilerplate's own settings, for its own Book (stack "none"): its names, branches, owners and the values
+# it sets differently from the Book's defaults. The defaults are book-defaults.toml and book-defaults/none.toml
+# beside this file; every reader merges this file over them (book_config.py), and `python devtools/book.py
+# config <key>` prints the merged value. A person confirms every change to this file — the guard asks.
 #
-# This is the boilerplate's own copy, for its own Book (stack "none"). `book init` writes a
-# project's copy from book-template/skeletons/factory.toml.tmpl with the same keys.
+# `book init` writes a project's copy from book-template/skeletons/factory.toml.tmpl.
 
-book_version = "1.5.0"
+book_version = "1.6.0"
 base_ref = "origin/main"
 protected_branches = ["main"]
 # Each person's private settings file — outside every repository, never read by a session
@@ -19,104 +18,16 @@ private_settings = "~/.boilerplate/local.toml"
 [book]
 name = "Boilerplate"
 title = "Book Boilerplate"
-# Other names that are this project's own, never reported as another project's leftovers.
-aliases = []
 slug = "boilerplate"
 env_prefix = "BOILERPLATE_"
 stack = "none"                    # none | dotnet | pytest
 packs = []                        # deploy | bitbucket | fe-guides
-# The roles a plan's task row may name, and ours (gen-task-rollup.py).
-our_role = "BE"
-roles = ["BE", "FE", "QA", "BA", "DevOps"]
-# The adoption date: a defect row found on or after it carries the *Found by* words (check-book.py).
-found_by_from = "2026-11-17"
-# A live document over this many lines is named, as a warning (check-book.py).
-size_warning = 1500
-# A plan's Status line is derived from its Tasks and checked (gen-task-rollup.py).
-derived_status_enforced = true
-# The heading an open question's suggested answer carries.
-recommendation_heading = "**Recommendation:**"
-# The columns of project.md Part 1's phase tables, in order; optional ones may be absent.
-phase_columns = ["Feature", "Plan", "FE guide", "Status", "Owner", "Depends on"]
-optional_phase_columns = []
+# The day this Book took the defects' Type and Source columns (check-book.py).
+type_source_from = "2026-11-23"
 # The word for the multi-tenant boundary (company, lab); empty = no multi-tenant rules.
 scoping_word = ""
 
-# ---------------------------------------------------------------- the guard
-#
-# What hooks/guard.py refuses or asks about in every Claude Code session — this repository's "never"
-# rules as data, so the guard itself carries none. Paths are case-insensitive globs from the
-# repository root; `**` spans folders.
-
-[guard]
-# Change an existing file: refused. Add a new one: allowed. `maintained` files may change.
-read_only = ["requirements/**"]
-# The trackers keep their current copy at a plain filename; add each one's exact path here.
-read_only_maintained = ["requirements/read-me.txt", "requirements/**/read-me.txt"]
-read_only_reason = "is a snapshot of a client document and is read-only. Only /book:check-sources adds to requirements/, as a new file."
-# Files already on the base branch that are never changed (the dotnet pack: applied migrations).
-applied = []
-never_by_hand = []
-# Writes a person confirms: the files that steer the AI — the same paths as [ai_files].
-ask = ["CLAUDE.md", "**/CLAUDE.md", "AGENTS.md", "AI-DEVELOPMENT-GUIDE.md",
-       ".claude/**", ".cursor/**", ".githooks/**",
-       "devtools/factory/**", "devtools/checks/**"]
-non_dev_targets = ["uat", "prod", "production", "preprod", "staging"]
-dotnet_ef = false                 # the dotnet pack: true
-appsettings_secrets = false       # the dotnet pack: true
-# Home folders of shared service accounts, not of a person.
-service_accounts = []
-# Google Drive: a Drive connector's MCP tool is refused unless its own name starts with a read verb;
-# an rclone command that deletes on a remote is refused.
-drive_connector = '(?i)^mcp__.*drive'
-drive_read_verbs = ["read", "search", "list", "get", "fetch", "download", "export", "find"]
-rclone_deleting = ["delete", "deletefile", "purge", "rmdir", "rmdirs", "cleanup", "dedupe", "sync", "bisync"]
-drive_reason = "A session never creates, moves or deletes on Google Drive; the FE guides reach it only through /book:publish-guides."
-
-# Generated documents: path = the command that writes them (the dotnet pack adds its own).
-[guard.generated]
-
-[requirements]
-id_prefix = "FSD"
-traceability = "docs/Audit/spec-traceability.md"
-
-# `book fsd-threads`: the live FSD Doc against the last check. The Doc's link is the line of
-# `links_file` starting with `fsd_link_label`; the last check is recorded in `live_check_record`.
-# The credential is a person's: `live_credential` lives in their private settings file.
-[requirements.sources]
-fsd_dir = "requirements/fsd"
-live_check_record = "requirements/fsd/read-me.txt"
-links_file = "requirements/read-me.txt"
-fsd_link_label = "FSD"
-# Other snapshot folders besides fsd_dir, each required to hold "<Name> - V<n>.<ext>" files (N14).
-snapshot_dirs = []
-out_of_scope = []
-
-# `book requirements status`: the folder under requirements/ that holds each LINKS line's snapshots.
-[requirements.sources.folders]
-"FSD" = "fsd"
-
-# ---------------------------------------------------------------- commands
-#
-# What ci-local.sh, check-rules.py (the `tests` enforcer) and the deploy gate run. An empty command is
-# reported N/A, never OK.
-[commands]
-build = ""
-# The boilerplate's only code is its tooling: its self-tests run in ci-local.sh's own step
-# (run-self-tests.py over each `self_tests` folder), so it has no separate test command.
-test = ""
-integration = ""
-integration_project = ""          # the folder of the integration tests, e.g. tests/App.IntegrationTests
-integration_filter = ""           # the filter for their in-process half, e.g. Category!=Smoke
-self_tests = ["devtools/factory/hooks", "devtools/factory", "devtools/checks"]
-
-[checks]
-# A fix commit's id: a defect or question id; the [jira] project key is added when set.
-fix_id = '\b[DQ]\d+\b'
-# CI files check-pipeline.py reads (the bitbucket pack).
-ci_files = []
-
-# ---------------------------------------------------------------- impact and review scope
+# ---------------------------------------------------------------- impact
 
 [impact]
 cross_cutting = []
@@ -129,39 +40,14 @@ high = ["^devtools/factory/hooks/", "^\\.claude/settings"]
 medium = ["^devtools/"]
 checks_only = ["docs/**", "requirements/**", "**/*.md"]
 
-# `book review-scope`: which parts of the review checklist a change needs read.
-[review_scope]
-folder = ".claude/review"
-always = ["book:peer-review/references/review-method.md", "book:peer-review/references/review-pass-a.md"]
-
-[review_scope.dimensions]
-B0 = "book:peer-review/references/review-b-core.md"
-
-[[review_scope.rows]]
-row = "Docs only (`docs/`, other `*.md`)"
-match = ["docs/*", "*.md"]
-not_applicable = ["B0"]
-
-[[review_scope.rows]]
-row = "`requirements/**`"
-match = ["requirements/*"]
-not_applicable = ["B0"]
-
 # ---------------------------------------------------------------- the files that steer the AI, the tracker, the host
 
-# A pull request that changes one passes `book ai-files` only when an owner made it, or an owner
-# approved it after its latest commit. Owners are Git-host account ids (`book pr whoami`). An empty
-# list fails closed. Without a Bitbucket remote `ai-files` reports N/A.
+# Owners are Git-host account ids (`book pr whoami`). An empty list fails closed. Without a Bitbucket remote
+# `ai-files` reports N/A.
 [ai_files]
 owners = [
     { name = "Boilerplate owner", account_id = "REPLACE_WITH_ACCOUNT_ID" },
 ]
-paths = [
-  "CLAUDE.md", "**/CLAUDE.md", "AGENTS.md", "AI-DEVELOPMENT-GUIDE.md",
-  ".claude/**", ".cursor/**", ".githooks/**",
-  "devtools/factory/**", "devtools/checks/**",
-]
-except = []
 
 # Where `book jira <key>` reads an issue from. Empty = no tracker; `book jira` says so.
 [jira]
@@ -171,16 +57,6 @@ project = ""
 # What `book protection --check` holds the live branch restrictions to.
 [protection]
 branches = ["main"]
-kinds = ["delete", "force", "push"]
-
-[protection.minimums]
-require_approvals_to_merge = 1
-require_passing_builds_to_merge = 1
-
-# While CI is switched off, devtools/checks/ci-local.sh is the gate before a pull request.
-[local_ci]
-required = true
 
 # [deploy], [deploy.tests], [deploy.DEV], [deploy.QA] — the deploy pack only.
 # [[modules]] — empty in the boilerplate; a project fills them.
-# [[code_rules]] — empty in the boilerplate; the pytest pack adds its own.

@@ -1,0 +1,11 @@
+# The Book's defaults for the fe-guides pack: the front-end guides' lists, empty until a project fills them. Read after book-defaults.toml when
+# `[book] packs` names fe-guides. The Book's file, like book-defaults.toml: change a value in factory.toml,
+# never here.
+
+# check-fe-guides.py: the guide that owns a section of api-contracts.md, where neither a guide's title nor its
+# **Base:** line names it; `guides = []` says no front-end guide owns it. Each entry gives its reason.
+# /book:check-guides: error codes the source returns that no route can, each with its reason. The Drive folder
+# is the project's own: [fe_guides] drive_folder_id in factory.toml.
+[fe_guides]
+owners = []
+internal_error_codes = []

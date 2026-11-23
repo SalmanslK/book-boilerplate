@@ -19,6 +19,6 @@ Each skill says when to use it in its own description; how the documentation ski
 
 ## Tooling note
 
-- **Claude Code** loads `CLAUDE.md`, `.claude/skills/` and `.claude/agents/` directly.
+- **Claude Code** loads `CLAUDE.md`, the book plugin's skills and agents, and the project's own `.claude/skills/`.
 - **Cursor** loads this file / `CLAUDE.md` (via rules) and `.claude/skills/`.
 - Do not invent a second rulebook under `.cursor/` — point at `CLAUDE.md`.

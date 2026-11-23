@@ -1,7 +1,11 @@
-# The AI tools' configuration for this repository: what the guard refuses or asks about in every Claude
-# Code session, who owns the files that steer the AI, where Jira is, and what the branch restrictions
-# must be. Read by factory.py and by hooks/guard.py. A person confirms every change to this file.
-# Written by `book init`; every <!-- FILL --> is an answer still to give.
+# This project's own settings: its names, branches, owners, tracker and paths, and every value it sets
+# differently from the Book's defaults. The defaults are devtools/factory/book-defaults.toml and
+# book-defaults/<pack>.toml - the Book's files, never edited here. Every reader (devtools/book.py, the guard,
+# the checks, the hooks, the local CI, the plugin's skills) merges this file over them: a table merges per
+# key, a list set here replaces the default (`[extend.<table>] <key> = [...]` adds to it instead), and a
+# [[code_rules]] entry changes the rule with its id. `python devtools/book.py config <key>` prints the merged
+# value. A person confirms every change to this file. Written by `book init`; every <!-- FILL --> is an answer
+# still to give.
 
 # The Book template version this repository's template-owned files came from. `book upgrade`
 # compares against it and bumps it; never edit it by hand.
@@ -14,55 +18,18 @@ private_settings = "~/.{{slug}}/local.toml"
 # This project's own names (`book verify` reports any other project's name as a leftover).
 [book]
 name = "{{name}}"
-# The product's title, as the documents' headings carry it; `aliases` lists other names that are
-# this project's own (a client's platform name, say), so verify never reports them as leftovers.
+# The product's title, as the documents' headings carry it. Other names that are this project's own (a
+# client's platform name, say) go in `aliases`, so verify never reports them as leftovers.
 title = "{{title}}"
-aliases = []
 slug = "{{slug}}"
 env_prefix = "{{env_prefix}}"
-# The stack and packs `book init` installed: verify, upgrade and the pack checks read them.
+# The stack and packs `book init` installed: verify, upgrade, the pack checks and the defaults layers read them.
 stack = "{{stack}}"
 packs = [{{packs}}]
-# Template files this project chose not to carry, because its own file does the job: `book
-# upgrade` reports each DECLINED and never writes it.
-declined = []
-# The columns of project.md Part 1's phase tables, in order; an optional one may be absent.
-phase_columns = ["Feature", "Plan", "FE guide", "Status", "Owner", "Depends on"]
-optional_phase_columns = []
-# A plan's Status line is derived from its Tasks and checked (gen-task-rollup.py). A Book adopted
-# from plans whose statuses disagree with their tasks may set false (a warning only) until they agree.
-derived_status_enforced = true
-# The job roles a task row may name, and the one this repository builds (its tasks drive a plan's status).
-roles = ["BE", "FE", "QA", "BA", "DevOps"]
-our_role = "BE"
-# The day the defect classes were adopted (check-book.py): a row found on or after it carries a class
-# docs/CLAUDE.md lists; older rows keep their label. Unset: every dated row is held to the list.
-# class_enforced_from = "YYYY-MM-DD"
-# The heading an open question's suggested answer carries in open-questions.md.
-recommendation_heading = "**Recommendation:**"
 
 [guard]
-read_only = ["requirements/**"]
-# The trackers keep their current copy at a plain filename; add each one's exact path here.
-read_only_maintained = ["requirements/read-me.txt", "requirements/**/read-me.txt"]
-read_only_reason = "is a snapshot of a client document and is read-only. Only /book:check-sources adds to requirements/, as a new file."
 applied = ["src/{{name}}.Persistence/Migrations/*.cs"]
-applied_reason = "is a migration already on the base branch. Never edit an applied migration; add a new one."
 never_by_hand = ["src/{{name}}.Persistence/Migrations/*ModelSnapshot.cs"]
-never_by_hand_reason = "is written by `dotnet ef migrations add`, never by hand."
-# The same paths as [ai_files].
-ask = ["CLAUDE.md", "**/CLAUDE.md", "AGENTS.md", "AI-DEVELOPMENT-GUIDE.md",
-       ".claude/**", ".cursor/**", ".githooks/**", "bitbucket-pipelines.yml",
-       "devtools/factory/**", "devtools/checks/**"]
-ask_except = ["devtools/checks/api_contracts_postman.py"]
-non_dev_targets = ["uat", "prod", "production", "preprod", "staging"]
-dotnet_ef = true
-appsettings_secrets = true
-service_accounts = []
-
-[guard.generated]
-"docs/api/api-contracts.md" = "python3 devtools/checks/gen-api-contracts.py"
-"docs/database-erd.md" = "python3 devtools/checks/gen-database-erd.py"
 
 # The dotnet pack's API contracts generator (gen-api-contracts.py) reads the project's own conventions
 # here; every key is optional and none is set by default. Uncomment what the project uses:
@@ -78,31 +45,16 @@ service_accounts = []
 # # Map-prefixed calls of the project's that register no route.
 # non_route_calls = ["MapDomainEvents"]
 
-[requirements]
-id_prefix = "FSD"
-traceability = "docs/Audit/spec-traceability.md"
-
 [requirements.sources]
-fsd_dir = "requirements/fsd"
-live_check_record = "requirements/fsd/read-me.txt"
-links_file = "requirements/read-me.txt"
 fsd_link_label = "{{fsd_label}}"
-# Other snapshot folders besides fsd_dir, each required to hold "<Name> - V<n>.<ext>" files
-# (`book verify`, N14) - for example "requirements/permissions-matrix".
-snapshot_dirs = []
 
 # The FE team's existing Drive folder for /book:publish-guides — its one owner; the skill and its script
 # read it with `book config fe_guides.drive_folder_id`.
 [fe_guides]
 drive_folder_id = "{{fe_drive_folder_id}}"
-# check-fe-guides.py: the guide that owns a section of api-contracts.md, where neither a guide's title nor its
-# **Base:** line names it; `guides = []` says no front-end guide owns it. Each entry gives its reason.
+# check-fe-guides.py and /book:check-guides add their entries here, each with its reason, for example:
 # owners = [{ section = "Unversioned routes", guides = [], reason = "probes, API docs and browser pages" }]
-owners = []
-# /book:check-guides: error codes the source returns that no route can, so no guide names them; each with its
-# reason. A code is `Module.Code`, or `Module.*` for a whole family.
 # internal_error_codes = [{ code = "Outbox.*", reason = "the mail queue's own; never reaches a client" }]
-internal_error_codes = []
 # Where /book:check-guides reads the source; the stack's defaults hold when these are unset (dotnet: src/*.cs,
 # the app.Map<Verb>( calls, and each module's Application and Domain Features folder).
 # source_files = ["src"]
@@ -114,12 +66,6 @@ internal_error_codes = []
 owners = [
 {{owners_toml}}
 ]
-paths = [
-  "CLAUDE.md", "**/CLAUDE.md", "AGENTS.md", "AI-DEVELOPMENT-GUIDE.md",
-  ".claude/**", ".cursor/**", ".githooks/**", "bitbucket-pipelines.yml",
-  "devtools/factory/**", "devtools/checks/**",
-]
-except = ["devtools/checks/api_contracts_postman.py"]
 
 [jira]
 site = "{{jira_site}}"
@@ -127,28 +73,6 @@ project = "{{jira_key}}"
 
 [protection]
 branches = [{{protected_branches}}]
-kinds = ["delete", "force", "push"]
-
-[protection.minimums]
-require_approvals_to_merge = 1
-require_passing_builds_to_merge = 1
 
 [local_ci]
 required = {{local_ci_required}}
-
-# [[code_rules]] (check-code-rules.py): a pattern refused where it is written, or allowed only where
-# `allowed` lists it with a reason. Every stack keeps this one; a stack pack appends its own at the end.
-[[code_rules]]
-id = "data-script-ddl"
-# Schema comes from migrations only; a data script creates no table, index, view or type. A TEMP table
-# (CREATE TEMP TABLE) is a script's own scratch space and never matches.
-pattern = '(?i)\b(?:CREATE|ALTER|DROP)\s+(?:OR\s+REPLACE\s+)?(?:UNIQUE\s+|UNLOGGED\s+)?(?:TABLE|INDEX|VIEW|MATERIALIZED\s+VIEW|SCHEMA|SEQUENCE|TYPE|DOMAIN|EXTENSION|FUNCTION|PROCEDURE|TRIGGER)\b'
-files = ["database-scripts/**/*.sql"]
-exempt = []
-skip_lines = '^\s*--'
-allowed = []
-message = "a data script never changes the schema; that is a migration's job (CLAUDE.md, Layout: database-scripts/ holds no schema). A sequence reset (ALTER SEQUENCE … RESTART) a seed script needs is an `allowed` entry with its reason."
-
-# `book review-scope`: which parts of the review checklist a change needs read (book:self-review,
-# book:peer-review). Rows place a path; a dimension a matched row lists as not applicable is left out.
-{{review_scope}}

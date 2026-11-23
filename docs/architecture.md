@@ -58,8 +58,16 @@ a file that differs is the project's, and is only listed, with the template's ch
 Why: without a record of what was installed, a newer template cannot tell a stale file from a
 deliberate edit, and a copy-over either drifts or destroys work. The tags are the record, so a
 project carries no lock file. Why the report is the default: every change it would make is shown
-before it is made. The skeletons' documents, `docs/` (but the plan template) and `requirements/`
+before it is made — in the report where a person decides (a conflict, the 1.6 move), and in a file the
+report names where `--apply` simply takes the template's copy, so the decisions are not lost among
+thousands of lines of routine diffs. The skeletons' documents, `docs/` (but the plan template) and `requirements/`
 are never compared: they are the project's content from the moment init writes them.
+While a file changed by both (CONFLICT) or deleted by the project (REMOVED) is left, `--apply` keeps
+`book_version` and lists the files in `[book] pending_merge`. Why: the installed version is the only
+base the template's change can be shown against; recording the new one would turn an unmerged conflict
+into a plain CHANGED file, its diff gone. Refusing `--apply` instead would hold back every file the
+project never changed. A merged file still differs from both copies, so a person takes it off the list,
+and the next `--apply` bumps the version once the list is empty.
 
 ### Self-tests against a fixture project
 

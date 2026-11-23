@@ -14,6 +14,10 @@ A template release pins the book plugin it needs: template v1.5.0's `.claude/set
 Plugin 0.6.0 runs only `devtools/book.py`, with no fallback to `factory.py`: every Book that pins it is on
 template 1.5.0, which has it.
 
+**Local work branches must not be named like a release tag; use `work/vX.Y.Z`.** Why: `git clone --branch`
+and a bare `vX.Y.Z` pick a branch of that name over the tag, and a branch can move. Upgrade reads the
+installed version from `refs/tags/v<version>` only, and the plugin's ledger reads use full ref names.
+
 **A long-lived branch older than v1.4.0 needs nothing first.** A project does not promote its base branch
 into `qa`, `uat` or `main` to take 1.5: that would release unfinished work. A pull request into a branch whose
 Book is older than v1.4.0 (`factory.py`, no `devtools/book.py`) is judged by that branch's own `factory.py`,

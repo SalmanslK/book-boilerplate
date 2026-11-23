@@ -1,7 +1,7 @@
 # The Book — start here
 
 The documents that say what the Book Boilerplate is, how it is built, and where the work has got to.
-Which document owns which topic is the table in [`CLAUDE.md`](../CLAUDE.md#where-knowledge-lives); this
+Which document owns which topic is the table in [the Book's rules](../.claude/book/rules.md#where-knowledge-lives); this
 page is the reading order.
 
 | Read | To learn |

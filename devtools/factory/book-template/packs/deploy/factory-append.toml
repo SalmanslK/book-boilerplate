@@ -2,40 +2,28 @@
 # ---------------------------------------------------------------- deploy
 #
 # The deploy pack: `book deploy` (devtools/factory/deploy.py) and /book:deploy read the project's DEV and QA
-# hosts here, and nothing else names one. DEV and QA only: UAT and production go through the team's release
-# process, and the guard refuses a deploy that names them. Every <…> is an answer still to give - a deploy
-# stops on one and says which, rather than guess a host. `book upgrade` names the keys still to fill. So a
-# filled value holds no <…> of its own (an HTML tag such as <title> reads as one); a redirect or `<=` is fine.
+# hosts here, and nothing else names one; what every deploy does the same way is the pack's defaults
+# (book-defaults/deploy.toml). DEV and QA only: UAT and production go through the team's release process, and
+# the guard refuses a deploy that names them. Every <…> is an answer still to give - a deploy stops on one and
+# says which, rather than guess a host. `book upgrade` names the keys still to fill. So a filled value holds
+# no <…> of its own (an HTML tag such as <title> reads as one); a redirect or `<=` is fine.
 [deploy]
 ssh_host = "<the DEV/QA host>"
 ssh_user = "<the deploy account on it>"
 ssh_key = "~/.ssh/<the deploy key>"
 backup_root = "<the folder the nightly backups go to>"
-backup_environments = ["dev", "qa"]
 # ci_daily = { folder = "~/<the nightly run's folder>", refs = ["dev"] }
-min_free_gb = 10
 # container_uid = "<the API container's user id>"   # its bind mounts and volumes must be its own
-bind_mounts = []
-volumes = []
 protected_probe = "<a real route that answers 401 with no token>"
 migrations = "<the migrations folder>"
-settings_check = "devtools/checks/check-required-settings.sh"
-gate_filter = "Category!=Smoke"
-smoke_filter = "Category=Smoke"
 test_db_variable = "{{env_prefix}}TEST_DB"
 smoke_url_variable = "{{env_prefix}}DEPLOYED_API_URL"
 smoke_credentials = ["{{env_prefix}}DEPLOYED_API_EMAIL", "{{env_prefix}}DEPLOYED_API_PASSWORD", "{{env_prefix}}DEPLOYED_API_TENANT_KEY"]
-# The only reasons a smoke test may skip, by the start of its message; any other skip fails the run.
-smoke_skip_reasons = { "No deployed API" = "URL not set", "No account to log in as" = "no credentials" }
 # Optional accounts, each an email and password pair, required on the environments `required_on` names.
 # smoke_pairs = [{ name = "reviewer", email = "{{env_prefix}}..._EMAIL", password = "{{env_prefix}}..._PASSWORD", reason = "No reviewer account", required_on = ["QA"] }]
-smoke_pairs = []
-# /book:deploy: the project's deployment plan (the platform, and why each check exists), and where the Book
-# records its last audit, which a QA deploy names. Empty: none yet, and the skill says so. Point the runbook
-# at the plan's section on the environments past DEV and QA (a path with its #anchor): when /book:deploy
-# refuses one, it names that section as the way there, and it reads no [deploy.notes] entry before refusing.
-runbook = ""
-audit_record = ""
+# /book:deploy: point `runbook` at the deployment plan's section on the environments past DEV and QA (a path
+# with its #anchor), and `audit_record` at where the Book records its last audit.
+# runbook = "docs/plans/deployment.md#beyond-qa"
 
 [deploy.tests]
 unit = "<the unit test project>"
@@ -44,21 +32,11 @@ integration = "<the integration test project>"
 
 [deploy.DEV]
 directory = "<the DEV checkout on the host>"
-compose_files = ["compose.yaml", "compose.dev.yaml"]
-profile = ""
 project = "<the DEV Compose project name>"
-settings_environment = "Development"
-api_port = 0
-public_url = ""
 
 [deploy.QA]
 directory = "<the QA checkout on the host>"
-compose_files = ["compose.yaml", "compose.qa.yaml"]
-profile = ""
 project = "<the QA Compose project name>"
-settings_environment = "QA"
-api_port = 0
-public_url = ""
 
 # /book:deploy: this project's own detail for a step, read with the step it names (check, gate, changes, up,
 # smoke, revert, report) - who owns which mount, what the probe route proves, the host's quirks. Optional.

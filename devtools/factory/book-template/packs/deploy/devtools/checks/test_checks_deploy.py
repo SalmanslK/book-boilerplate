@@ -78,6 +78,19 @@ class ComposeTests(unittest.TestCase):
             config.write_text("[deploy.compose.DEV]\napi = [8280]\n", encoding="utf-8")
             self.assertEqual(check_compose.expected(root), {"laptop": {}, "DEV": {"api": ["8280"]}, "QA": {}})
 
+    def test_the_projects_own_placeholders_are_a_setting(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "devtools" / "factory").mkdir(parents=True)
+            config = root / "devtools" / "factory" / "factory.toml"
+            config.write_text("[deploy.compose_placeholders]\nEXTRA_KEY = 'ci-placeholder'\n", encoding="utf-8")
+            self.assertEqual(check_compose.project_placeholders(root), {"EXTRA_KEY": "ci-placeholder"})
+            config.write_text("[deploy]\nssh_host = 'h'\n", encoding="utf-8")
+            self.assertEqual(check_compose.project_placeholders(root), {})
+            config.write_text("[deploy.compose_placeholders]\nEXTRA_KEY = 3\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "compose_placeholders"):
+                check_compose.project_placeholders(root)
+
 
 class ComposeThrowawaySettingTests(unittest.TestCase):
     """Throwaway PostgreSQL settings belong in the tests' container, never in a compose file."""

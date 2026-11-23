@@ -36,6 +36,12 @@ import tomllib
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+# The settings: factory.toml merged over the Book's defaults (devtools/factory/book_config.py).
+_FACTORY = next((p / "devtools" / "factory" for p in Path(__file__).resolve().parents
+                 if (p / "devtools" / "factory" / "book_config.py").is_file()), None)
+if _FACTORY is not None:
+    sys.path.insert(0, str(_FACTORY))
+import book_config  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
@@ -73,8 +79,7 @@ def contract_settings(root: Path = ROOT) -> dict:
         non_route_calls = ["MapDomainEvents"]
     """
     try:
-        with open(root / "devtools" / "factory" / "factory.toml", "rb") as handle:
-            config = tomllib.load(handle)
+        config = book_config.load(root)
     except (OSError, ValueError):
         config = {}
     table = config.get("api_contracts") or {}
@@ -440,6 +445,9 @@ class TypeIndex:
 
 def load_permission_catalogue() -> dict[str, str]:
     """'Companies.Create' → 'companies.create', from the nested static classes in Permissions.cs."""
+    if not PERMISSIONS_FILE.is_file():
+        raise SystemExit(f"{PERMISSIONS_FILE.relative_to(ROOT).as_posix()} is missing, but the API has C# files: "
+                         "the generator reads each route's permission from its catalogue")
     text = strip_comments(PERMISSIONS_FILE.read_text(encoding="utf-8-sig"))
     catalogue: dict[str, str] = {}
     for m in re.finditer(r"static\s+class\s+(\w+)\s*\{", text):
@@ -1274,6 +1282,11 @@ def main() -> int:
                     help="fail if api-contracts.md or the Postman collection is out of date")
     args = ap.parse_args()
 
+    if not PERMISSIONS_FILE.is_file() and not api_files():
+        # A greenfield Book, before its first project exists: nothing to describe yet, so its first commit passes
+        # (Book D59), as verify reports the contracts N/A.
+        print("api-contracts.md: N/A, no Permissions.cs yet (no API project under src/)")
+        return 0
     groups, unversioned, types = collect()
     files = outputs(groups, unversioned, types)
     if args.check:
@@ -1299,4 +1312,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # UTF-8 out, so an em dash prints on a Windows console's code page too (Book D45).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     sys.exit(main())

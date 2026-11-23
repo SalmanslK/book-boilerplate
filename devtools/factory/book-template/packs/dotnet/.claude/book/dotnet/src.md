@@ -1,11 +1,13 @@
 # Code rules
 
+The Book's rules for this folder, the same in every project with the dotnet pack: the folder's `CLAUDE.md` imports this file and holds only the project's own beside it. **This file is the Book's** — `book upgrade` replaces it, and check-book fails when a project's copy differs.
+
 Loaded when you work under `src/`, and to be read before changing or reviewing product code. The root
-[`CLAUDE.md`](../CLAUDE.md) still applies; `src/Boilerplate.Persistence/` and `src/Boilerplate.API/` add their own.
+[`CLAUDE.md`](../../../CLAUDE.md) still applies; `src/Boilerplate.Persistence/` and `src/Boilerplate.API/` add their own.
 
-Why each rule below exists is in [`docs/architecture.md`](../docs/architecture.md) — the link after each group goes to its section.
+Why each rule below exists is in [`docs/architecture.md`](../../../docs/architecture.md) — the link after each group goes to its section.
 
-Dependencies ([why](../docs/architecture.md#when-to-take-a-library-and-when-not-to)):
+Dependencies ([why](../../../docs/architecture.md#when-to-take-a-library-and-when-not-to)):
 
 - **Prefer a maintained open-source library over writing our own.** Write our own
   only when the surface is small (~100 lines), the dependency carries governance risk,
@@ -16,7 +18,7 @@ Dependencies ([why](../docs/architecture.md#when-to-take-a-library-and-when-not-
 - Package versions live in `Directory.Packages.props` — never `Version=` on a
   `PackageReference`.
 
-Structure ([why](../docs/architecture.md#2-where-classes-live)):
+Structure ([why](../../../docs/architecture.md#2-where-classes-live)):
 
 - Feature slices live in `Features/<Feature>/` with `Dtos/`, `Mappings/`, `Commands/`,
   `Queries/`, `EventHandlers/`. Anything else goes in a folder named for what it holds.
@@ -41,7 +43,7 @@ Structure ([why](../docs/architecture.md#2-where-classes-live)):
 - Never reference EF Core, Npgsql or ASP.NET Core from Domain or Application
   *(not enforced yet: add a `LayerDependencyTests` architecture test, then mark it `[enforced: …]`)* — fix the design, do not suppress.
 
-Style ([why](../docs/architecture.md#13-naming); [time](../docs/architecture.md#10-cross-cutting-decisions); [LINQ](../docs/architecture.md#linq-method-syntax-and-correlated-subqueries)):
+Style ([why](../../../docs/architecture.md#13-naming); [time](../../../docs/architecture.md#10-cross-cutting-decisions); [LINQ](../../../docs/architecture.md#linq-method-syntax-and-correlated-subqueries)):
 
 - `sealed` and `readonly` by default; primary constructors where they read better;
   records for immutable request and response shapes; `IReadOnlyCollection<T>` on the
@@ -53,7 +55,7 @@ Style ([why](../docs/architecture.md#13-naming); [time](../docs/architecture.md#
   that renames an EF Core method one-for-one. A string that must match another — a
   tag, an endpoint name, a lock key, a validator message — is one constant beside the
   code that owns it, never a global `Constants` class
-  ([what counts](../docs/architecture.md#14-what-not-to-build)) *(not enforced yet:
+  ([what counts](../../../docs/architecture.md#14-what-not-to-build)) *(not enforced yet:
   add a `StringConstantRuleTests` architecture test, then mark it `[enforced: …]`)*.
 - **Rename unclear code rather than comment it.** No commented-out code.
 - **No `TODO` for a requirement already known** — build it, or track it as a Q or D.
@@ -71,7 +73,7 @@ Style ([why](../docs/architecture.md#13-naming); [time](../docs/architecture.md#
 - **Generic by default, explicit by necessity.** When two rules collide, say which two
   and which you kept.
 
-Behaviour ([why](../docs/architecture.md#7-cqrs-and-the-dispatcher); [auditing, soft delete, tenancy](../docs/architecture.md#8-auditing); [results](../docs/architecture.md#9-errors-and-results)):
+Behaviour ([why](../../../docs/architecture.md#7-cqrs-and-the-dispatcher); [auditing, soft delete, tenancy](../../../docs/architecture.md#8-auditing); [results](../../../docs/architecture.md#9-errors-and-results)):
 
 - **Handlers own their save.** A create handler must save before returning a
   database-generated id.
@@ -82,7 +84,7 @@ Behaviour ([why](../docs/architecture.md#7-cqrs-and-the-dispatcher); [auditing, 
   reference data** *(not enforced yet: add a `TenancyTests` architecture test, then mark it `[enforced: …]`)*; opting out is an allow-list entry
   with a reason. Never pass a tenant id into a domain method *(not enforced yet: add a `TenancyTests` architecture test, then mark it `[enforced: …]`)*; never add
   `Where(x => x.TenantId == …)` by hand. **Prove isolation with a two-tenant
-  integration test** ([`tests/CLAUDE.md`](../tests/CLAUDE.md)).
+  integration test** ([`tests/CLAUDE.md`](tests.md)).
 - **Anything that belongs to a company implements `ICompanyScoped`** — a session sees only
   its company's rows, and nothing in none. Opt-in; `CompanyId` is stamped on insert, never
   set by a caller; a scoped aggregate is also tenant-scoped *(not enforced yet: add a `TenancyTests` architecture test, then mark it `[enforced: …]`)*.
@@ -124,7 +126,7 @@ Behaviour ([why](../docs/architecture.md#7-cqrs-and-the-dispatcher); [auditing, 
   such as `IUserEmailNotifier` **before** its last save — inside the
   `ExecuteInTransactionAsync` block when it has one — and the port adds an outbox row to
   that same save; a worker sends it with retries. The port sends and saves nothing.
-  ([architecture guide](../docs/architecture.md#external-side-effects-email-and-http))
+  ([architecture guide](../../../docs/architecture.md#external-side-effects-email-and-http))
 - Endpoints dispatch through `ISender` — no logic, repositories or `DbContext`
   *(not enforced yet: add a `EndpointIsolationTests` architecture test, then mark it `[enforced: …]`)*.
 - **Authorization is default-deny**: every `.AllowAnonymous()` is an `anonymous-route` allow-list entry,
@@ -142,7 +144,7 @@ Behaviour ([why](../docs/architecture.md#7-cqrs-and-the-dispatcher); [auditing, 
   `[dotnet_checks] list_items_nullable` entry with its reason *[enforced: `check-dotnet.py`, pre-commit + CI]*.
 - Validators measure trimmed lengths *(not enforced yet: add a `UntrimmedLengthRuleTests` architecture test, then mark it `[enforced: …]`)*.
 
-Security ([logging](../docs/architecture.md#10-cross-cutting-decisions)):
+Security ([logging](../../../docs/architecture.md#10-cross-cutting-decisions)):
 
 - `ASPNETCORE_ENVIRONMENT` is exactly `Development`, `QA`, `UAT`, `Production` (or
   `Testing`, test host only) — case-sensitive on Linux.
@@ -155,11 +157,11 @@ Security ([logging](../docs/architecture.md#10-cross-cutting-decisions)):
   codes, connection strings, or customer-identifying data. **Log through a `[LoggerMessage]` method** in
   the area's `*Log` class, with an event id from its range — never a direct
   `logger.Log…` call, never string interpolation
-  ([why and the ranges](../docs/architecture.md#10-cross-cutting-decisions))
+  ([why and the ranges](../../../docs/architecture.md#10-cross-cutting-decisions))
   *(not enforced yet: add a `ProductCodeRuleTests` architecture test, then mark it `[enforced: …]`)*.
 - Never put a secret in a commit message, branch name or test fixture.
 
-Database — full rules in [`src/Boilerplate.Persistence/CLAUDE.md`](Boilerplate.Persistence/CLAUDE.md):
+Database — full rules in [`src/Boilerplate.Persistence/CLAUDE.md`](persistence.md):
 
 - Every schema change is an EF Core migration; never edit an applied one *[enforced:
   `check-protected-paths.py`, CI]*; never hand-edit a migration or the snapshot except to add

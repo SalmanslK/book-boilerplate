@@ -26,7 +26,8 @@ template repository's tag `v<book_version>` with the project's names - and the n
 which are CURRENT, BEHIND (unchanged by the project, changed by the template), NEW, CHANGED by the
 project, or CONFLICT (changed by both), and prints a unified diff for each it would write. It writes
 nothing unless `--apply`; then it writes only BEHIND and NEW files, lists every project-changed one for a
-person, and bumps `book_version` in factory.toml.
+person, and bumps `book_version` in factory.toml - or, while a CONFLICT or REMOVED file is left, keeps it and
+lists those files in `[book] pending_merge` until a person merges each and takes it off the list.
 
 Python 3.11+, standard library only.
 """
@@ -36,6 +37,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -55,6 +57,10 @@ except ModuleNotFoundError:  # Python < 3.11
     tomllib = None
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import book_config
+import book_migrate  # noqa: E402 — beside this file: the settings merged over the Book's defaults
+
 TEMPLATE_DIR = HERE / "book-template"
 MANIFEST = TEMPLATE_DIR / "manifest.toml"
 CONFIG_RELATIVE = "devtools/factory/factory.toml"
@@ -67,6 +73,8 @@ SELF_TEST_SECONDS = 1200
 NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
                 "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
 DEFECT_STATUSES = ("Open", "Mitigated", "Partial", "Blocked")
+# check-book.py TYPES: a 1.6 defect row's Type.
+DEFECT_TYPES = ("spec-divergence", "bug", "regression", "test-gap", "security", "data", "config-infra", "tooling-ci")
 QUESTION_STATUSES = ("OPEN", "ANSWERED", "SUPERSEDED")
 PLAN_FIELDS = ("**Owner:**", "**FSD:**", "**Checked against:**", "**FE guide:**", "**Depends on:**")
 # project.md's phase-table columns, in order, and what heads an open question's recommendation:
@@ -141,6 +149,10 @@ class Context:
             return None
         return path.read_text(encoding="utf-8", errors="replace")
 
+    def instructions(self, rel: str) -> str | None:
+        """An instruction file as Claude Code reads it: its `@path` imports in place."""
+        return book_config.expanded(self.root, rel) if (self.root / rel).is_file() else None
+
 
 def load_manifest(template_dir: Path = TEMPLATE_DIR) -> dict:
     if tomllib is None:
@@ -153,7 +165,19 @@ def load_manifest(template_dir: Path = TEMPLATE_DIR) -> dict:
 
 
 def load_target_config(root: Path) -> dict:
-    """The target's factory.toml, read as data. Its private settings are not merged here."""
+    """The target's settings: its factory.toml over the Book defaults it holds (book_config). Its private
+    settings are not merged here."""
+    path = root / CONFIG_RELATIVE
+    if not path.is_file() or tomllib is None:
+        return {}
+    try:
+        return book_config.load(root)
+    except book_config.ConfigError as error:
+        raise BookError(f"The target's settings are unreadable: {error}.") from None
+
+
+def load_target_own(root: Path) -> dict:
+    """The target's own factory.toml alone, without the defaults: the names init wrote and what upgrade splits."""
     path = root / CONFIG_RELATIVE
     if not path.is_file() or tomllib is None:
         return {}
@@ -227,8 +251,7 @@ def plain(text: str) -> str:
     return " ".join(re.sub(r"[*`]", "", text).split())
 
 
-def cells(line: str) -> list[str]:
-    return [c.strip() for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
+cells = book_config.table_cells  # one splitter for every Book table
 
 
 def sample(items: list[str], limit: int = 3) -> str:
@@ -397,16 +420,21 @@ def n6_instruction_files(ctx: Context) -> list[Line]:
         unnamed = [f for f in folders if not re.search(rf"(?<![\w./-]){re.escape(f)}(?![\w.-])", agents)]
         lines.append(Line(WRONG, "AGENTS.md names every nested folder", f"leaves out {sample(unnamed)}")
                      if unnamed else Line(OK, "AGENTS.md names every nested folder"))
+    # Each import names a file that exists: a missing one leaves Claude Code reading the line as text.
+    broken = [gap for rel in ["CLAUDE.md"] + nested for gap in book_config.missing_imports(ctx.root, rel)]
+    lines.append(Line(MISSING, "every import in a CLAUDE.md resolves", sample(broken)) if broken
+                 else Line(OK, "every import in a CLAUDE.md resolves"))
     for line in lines:
         line.code = "N6"
     return lines
 
 
 def owner_tokens(root_text: str) -> list[str]:
-    """The paths CLAUDE.md's owner table names - check-book.py's reading of the same table."""
+    """The paths CLAUDE.md's owner tables name - check-book.py's reading of the same tables, the imports in
+    place (the Book's table is in .claude/book/rules.md)."""
     if "## Where knowledge lives" not in root_text:
         return []
-    table = root_text.split("## Where knowledge lives", 1)[1].split("\n## ", 1)[0]
+    table = "\n".join(part.split("\n## ", 1)[0] for part in root_text.split("## Where knowledge lives")[1:])
     tokens = []
     for line in table.splitlines():
         if line.startswith("|") and line.count("|") > 2:
@@ -418,7 +446,7 @@ def owner_tokens(root_text: str) -> list[str]:
 
 def n7_owners_exist(ctx: Context) -> list[Line]:
     name = "every owner in Where knowledge lives exists"
-    text = ctx.text("CLAUDE.md")
+    text = ctx.instructions("CLAUDE.md")
     if text is None:
         return [Line(COULD_NOT, name, "no CLAUDE.md")]
     tokens = owner_tokens(text)
@@ -437,7 +465,7 @@ def n7_owners_exist(ctx: Context) -> list[Line]:
 
 def n8_archive(ctx: Context) -> list[Line]:
     name = "every archive row has its file"
-    text = ctx.text("docs/CLAUDE.md")
+    text = ctx.instructions("docs/CLAUDE.md")
     if text is None:
         return [Line(MISSING, name, "docs/CLAUDE.md")]
     named = sorted(set(re.findall(r"archive/[\w.-]+\.md", section(text, "## Current state, not history") or text)))
@@ -516,7 +544,7 @@ def n10_ledgers(ctx: Context) -> list[Line]:
         return lines
     problems = [f"no \"{h}\"" for h in ("## Open", "## Fixed") if not any(l.strip() == h for l in defects.splitlines())]
     classes = set(re.findall(r"^\|\s*`([a-z-]+)`\s*\|", ctx.text("docs/CLAUDE.md") or "", re.M))
-    status_at = None
+    status_at, type_at = None, None
     for line in section(defects, "## Open").splitlines():
         if not line.startswith("|"):
             status_at = None if not line.strip() else status_at
@@ -524,12 +552,22 @@ def n10_ledgers(ctx: Context) -> list[Line]:
         row = cells(line)
         if "Status" in row:
             status_at = row.index("Status")
+            # From 1.6 the Open table has Type and Source columns (check-book checks their values) and a row
+            # says only when it was found; the older table carries "Class: <slug> · found <date>" instead.
+            type_at = row.index("Type") if "Type" in row and "Source" in row else None
             continue
         if status_at is None or set(line) <= set("|-: ") or len(row) <= status_at:
             continue
         status = row[status_at].strip("` ")
         if not status.startswith(DEFECT_STATUSES) or status.startswith("Blocked") and "—" not in status:
             problems.append(f"{row[0]}: Status {status!r}")
+        if type_at is not None:
+            kind = row[type_at].strip("`* ") if type_at < len(row) else ""
+            if not re.search(r"found \d{4}-\d{2}-\d{2}", line):
+                problems.append(f"{row[0]}: no \"found <date>\"")
+            if kind not in ("", "—", "-") and kind not in DEFECT_TYPES:
+                problems.append(f"{row[0]}: Type {kind!r} is not one of {', '.join(DEFECT_TYPES)}")
+            continue
         found = re.search(r"Class:\s*([a-z-]+)\s*·\s*found \d{4}-\d{2}-\d{2}", line)
         if not found:
             problems.append(f"{row[0]}: no \"Class: <slug> · found <date>\"")
@@ -578,6 +616,14 @@ def n12_fe_guides(ctx: Context) -> list[Line]:
         if path.name != "api-conventions.md" and not re.search(r"^#{2,4} .*Deviations", text, re.M):
             problems.append(f"{path.name}: no Deviations section")
     filling = [p.name for p in guides if FILL.search(p.read_text(encoding="utf-8", errors="replace"))]
+    if "fe-guides" in installed_packs(ctx.config):
+        # What the pack puts in docs/ (the guide template, its skeletons): a Book installed before upgrade
+        # offered the template lacks it (Book D44).
+        skipped = skipped_skeletons(ctx.config)
+        absent = [rel for rel in pack_docs(ctx.manifest, "fe-guides")
+                  if not (ctx.root / rel).is_file() and rel not in skipped]
+        if absent:
+            return [Line(MISSING, name, ", ".join(absent))]
     if problems:
         return [Line(WRONG, name, sample(problems, 2))]
     if filling:
@@ -694,6 +740,12 @@ def n15_factory_config(ctx: Context) -> list[Line]:
     trace = (ctx.config.get("requirements") or {}).get("traceability")
     if trace and not (ctx.root / trace).is_file():
         fill.append(f"{trace} (written by /book:fact-check)")
+    book_table = ctx.config.get("book") or {}
+    unmerged = book_table.get(PENDING_MERGE) or []
+    if unmerged:
+        fill.append(f"[book] {PENDING_MERGE}: {len(unmerged)} template file(s) the upgrade to "
+                    f"{book_table.get(PENDING_FOR) or '?'} left to merge by hand ({sample(list(map(str, unmerged)), 4)}) - "
+                    "merge each, take it off the list, and run `book upgrade --apply` again")
     if problems:
         return [Line(WRONG, name, "; ".join(problems))] + ([Line(TO_FILL, name, "; ".join(fill))] if fill else [])
     return [Line(TO_FILL, name, "; ".join(fill))] if fill else [Line(OK, name)]
@@ -932,12 +984,24 @@ def n20_names(ctx: Context) -> list[Line]:
     return lines
 
 
+def n22_book_files(ctx: Context) -> list[Line]:
+    """The Book's own files as the Book wrote them (book-files.lock): check-book's drift check, as verify sees it."""
+    name = "the Book's files are as the Book wrote them"
+    if not (ctx.root / book_config.LOCK).is_file():
+        return [Line(NA, name, f"no {book_config.LOCK} (a Book before 1.6: `book upgrade --apply` writes it)", "N22")]
+    problems, warnings = book_config.drift(ctx.root, ctx.config)
+    lines = [Line(WRONG, name, sample([p.split(":", 1)[0] for p in problems]), "N22")] if problems else []
+    lines += [Line(CONFIRM, "a Book file kept changed, for now", w, "N22") for w in warnings]
+    return lines or [Line(OK, name, "", "N22")]
+
+
 N_CHECKS: list[tuple[str, Callable[[Context], list[Line]]]] = [
     ("N1", n1_hooks_path), ("N2", n2_settings), ("N3", n3_guard_mode), ("N4", n4_gitignore),
     ("N5", n5_gitattributes), ("N6", n6_instruction_files), ("N7", n7_owners_exist), ("N8", n8_archive),
     ("N9", n9_project), ("N10", n10_ledgers), ("N11", n11_plan_status), ("N12", n12_fe_guides),
     ("N13", n13_requirements), ("N14", n14_snapshots), ("N15", n15_factory_config), ("N16", n16_skills),
     ("N17", n17_drive_folder), ("N18", n18_private_settings), ("N19", n19_gitkeep), ("N20", n20_names),
+    ("N22", n22_book_files),
 ]
 
 # ---------------------------------------------------------------- the existing checks, called
@@ -1059,7 +1123,10 @@ APPEND = "factory-append.toml"
 SKELETONS_DIR = "devtools/factory/book-template/skeletons"
 # What running a pack's self-tests in place leaves behind: never a template file.
 CACHES = {"__pycache__", ".pytest_cache"}
-REVIEW_SCOPE = "review-scope.toml"  # a stack pack's own [review_scope]; the skeletons' is the core one
+# A pack's own [review_scope] and factory.toml additions before v1.6, which a template from before then still
+# holds (an installed version rebuilt from its tag): never a file a Book carries. From v1.6 both are the
+# defaults files, book-defaults/<stack>.toml.
+REVIEW_SCOPE = "review-scope.toml"
 
 
 def load_params(path: Path) -> dict:
@@ -1107,16 +1174,6 @@ def substitutions(manifest: dict, params: dict) -> list[tuple[str, str]]:
     return sorted([(a, b) for a, b in pairs if a and a != b], key=lambda pair: -len(pair[0]))
 
 
-def review_scope_block(template_root: Path, packs: list[str]) -> str:
-    """factory.toml's [review_scope]: the stack pack's own dimensions where it ships them, else the core B0."""
-    for pack in packs:
-        own = template_root / PACKS_DIR / pack / REVIEW_SCOPE
-        if own.is_file():
-            return own.read_text(encoding="utf-8").strip()
-    core = template_root / SKELETONS_DIR / REVIEW_SCOPE
-    return core.read_text(encoding="utf-8").strip() if core.is_file() else ""
-
-
 # The nested CLAUDE.md files every Book has (docs/, tests/): the root CLAUDE.md's table starts with them.
 CORE_INSTRUCTIONS = 2
 
@@ -1127,7 +1184,7 @@ def pack_rows(manifest: dict, packs: list[str], pairs: list[tuple[str, str]]) ->
     settings = [((manifest.get("packs") or {}).get(pack) or {}) for pack in packs]
     instructions = [row for pack in settings for row in pack.get("instructions", [])]
     owners = [row for pack in settings for row in pack.get("owners", [])]
-    rules = [rule for pack in settings for rule in pack.get("features", [])]
+    imports = [path for pack in settings for path in pack.get("imports", [])]
     count = CORE_INSTRUCTIONS + len(instructions)
     words = {n: w for w, n in NUMBER_WORDS.items()}
     return {
@@ -1135,8 +1192,8 @@ def pack_rows(manifest: dict, packs: list[str], pairs: list[tuple[str, str]]) ->
             renamed(f"| `{row['file'][:-len('CLAUDE.md')]}` | [`{row['file']}`]({row['file']}) — {row['says']} |\n", pairs)
             for row in instructions),
         "pack_owner_rows": "".join(f"| {row['topic']} | {row['owner']} |\n" for row in owners),
-        # A pack's rules for the root CLAUDE.md's Features: they name its own check, so they come with it.
-        "pack_feature_rules": "".join(f"{rule.rstrip()}\n" for rule in rules),
+        # A pack's Book rules files: the root CLAUDE.md imports each after the Book's own rules.
+        "pack_imports": "".join(f"@{path}\n" for path in imports),
         "instruction_count": words.get(count, str(count)).capitalize(),
     }
 
@@ -1159,10 +1216,9 @@ def fill_skeleton(text: str, params: dict) -> str:
         "fe_drive_folder_id": params["fe_drive_folder_id"] or "<FILL-FE-DRIVE-FOLDER-ID>",
         "owners_toml": owners_toml,
         "book_version": str(params.get("book_version") or "<!-- FILL: the template version -->"),
-        "review_scope": params.get("review_scope") or "",
         "pack_instruction_rows": params.get("pack_instruction_rows") or "",
         "pack_owner_rows": params.get("pack_owner_rows") or "",
-        "pack_feature_rules": params.get("pack_feature_rules") or "",
+        "pack_imports": params.get("pack_imports") or "",
         "instruction_count": params.get("instruction_count") or "Two",
     }
     return re.sub(r"\{\{(\w+)\}\}", lambda m: values.get(m.group(1), m.group(0)), text)
@@ -1190,12 +1246,12 @@ def template_sources(template_root: Path, manifest: dict, packs: list[str]) -> l
     pack's file wins over a core file at the same path, so init and upgrade agree on which one a Book has."""
     copied = expand(template_root, list(manifest.get("copy", {}).get("book", [])))
     pack_sources = []
-    for pack in packs:
-        folder = template_root / PACKS_DIR / pack
+    for folder in [template_root / PACKS_DIR / pack for pack in packs]:
         pack_sources += [(p.relative_to(folder).as_posix(), p) for p in sorted(folder.rglob("*"))
                          if p.is_file() and p.name not in (APPEND, REVIEW_SCOPE) and not CACHES & set(p.parts)]
-    replaced = {rel for rel, _ in pack_sources}
-    return [(rel, template_root / rel) for rel in copied if rel not in replaced] + pack_sources
+    # A pack's file wins over a copied one at the same path (a later pack's over an earlier one's).
+    layered = dict(pack_sources)
+    return [(rel, template_root / rel) for rel in copied if rel not in layered] + list(layered.items())
 
 
 def verbatim(rel: str, source: Path, template_root: Path, manifest: dict) -> bool:
@@ -1251,7 +1307,7 @@ def init(target: Path, params: dict, manifest: dict, template_root: Path, run: R
     created = set()
     # factory.toml's book_version: the template version this Book came from (`book upgrade` reads it).
     values = dict(params, book_version=str(manifest.get("version") or ""),
-                  review_scope=review_scope_block(template_root, packs), **pack_rows(manifest, packs, pairs))
+                  **pack_rows(manifest, packs, pairs))
     for dest_rel, skeleton in skeletons.items():
         dest_rel = renamed(dest_rel, pairs)
         dest = target / dest_rel
@@ -1280,6 +1336,9 @@ def init(target: Path, params: dict, manifest: dict, template_root: Path, run: R
         path.mkdir(parents=True, exist_ok=True)
         (path / ".gitkeep").write_text("", encoding="utf-8")
         lines.append(Line(CREATED, f"{folder.rstrip('/')}/.gitkeep"))
+    # What the Book wrote, so check-book can tell when a project changes a file the next upgrade replaces.
+    if write_lock(target, owned_files(template_root, manifest, params, packs)):
+        lines.append(Line(CREATED, book_config.LOCK))
     made_paths = [l.element for l in lines if l.status == CREATED]  # a created line names only its path
     if made_paths:
         code, out = run(["git", "add", "--", *made_paths], target, 120)
@@ -1331,12 +1390,45 @@ CHANGED = "CHANGED"      # changed by the project; the template did not change i
 CONFLICT = "CONFLICT"    # changed by the project and by the new template: kept, for a person
 REMOVED = "REMOVED"      # the project deleted a file the installed version had: left absent, for a person
 DROPPED = "DROPPED"      # the installed version had it, the new template does not: kept, for a person
+RETIRED = "RETIRED"      # a DROPPED file of the Book's own template copy, unchanged and read by nothing: --apply removes
+TEMPLATE_COPY = "devtools/factory/book-template/"  # book_config.LOCK_EXEMPT: the Book's source, never run here
+SPLIT = "SPLIT"          # a nested CLAUDE.md the Book owned before 1.6: the 1.6 move keeps it, importing the rules
 UNKNOWN = "UNKNOWN"      # differs from the new template, and no installed version to compare: kept
 DECLINED = "DECLINED"    # the project's `[book] declined` names it: never written, nothing for a person
+RESOLVED = "RESOLVED"    # a CONFLICT or REMOVED a person settled, by taking it out of `[book] pending_merge`: kept
 FOR_A_PERSON = (CONFLICT, REMOVED, DROPPED, UNKNOWN)
+# What --apply leaves to merge by hand (Book D56): while any CONFLICT or REMOVED file remains, book_version stays
+# at the installed version, so the next report still shows the template's change; the files are listed here.
+PENDING_MERGE, PENDING_FOR = "pending_merge", "pending_merge_for"
 # A project's own content, never touched by upgrade even where a template pattern would reach it.
 PROJECT_CONTENT = ("requirements/*", "docs/*")
-TEMPLATE_DOCS = ("docs/plans/_template.md",)
+# The template files under docs/ that the template owns, as it owns any S file: the core plan template and the
+# fe-guides pack's guide template (Book D44), so upgrade offers each NEW or BEHIND like any other.
+TEMPLATE_DOCS = ("docs/plans/_template.md", "docs/fe-integration-guides/_template.md")
+# The template version that first owned each: an older installed version shipped it as the project's own (or
+# not at all), so its absence is NEW, never REMOVED.
+TEMPLATE_DOCS_SINCE = {"docs/fe-integration-guides/_template.md": "1.5.1"}
+
+
+def owned_then(files: dict[str, bytes], version: str) -> dict[str, bytes]:
+    """What the installed version owned: its files, less the template docs it did not own yet."""
+    return {rel: data for rel, data in files.items()
+            if not (rel in TEMPLATE_DOCS_SINCE and version_key(version) < version_key(TEMPLATE_DOCS_SINCE[rel]))}
+
+
+def skipped_skeletons(config: dict) -> set[str]:
+    """`[book] skip_skeletons`: a pack's optional documents this project has chosen not to keep (a Book with
+    the fe-guides pack and no UI standard of its own: `["docs/ui-standard.md"]`). Neither verify nor the upgrade
+    asks for one."""
+    return {str(rel) for rel in (config.get("book") or {}).get("skip_skeletons") or []}
+
+
+def pack_docs(manifest: dict, pack: str) -> list[str]:
+    """What a pack puts in docs/ that verify expects: its template docs and its skeletons' targets."""
+    prefix = f"{PACKS_DIR}/{pack}/"
+    skeletons = ((manifest.get("packs") or {}).get(pack) or {}).get("skeletons", {})
+    owned = [rel for rel in TEMPLATE_DOCS if (HERE.parents[1] / (prefix + rel)).is_file()]
+    return owned + sorted(rel for rel in skeletons if rel.startswith("docs/"))
 
 
 def version_key(version: str) -> tuple[int, ...] | None:
@@ -1386,13 +1478,17 @@ def owned_files(template_root: Path, manifest: dict, params: dict, packs: list[s
 
 
 def installed_tree(template_root: Path, version: str, scratch: Path, run: Runner) -> tuple[Path | None, str]:
-    """The template repository at tag v<version>, unpacked into `scratch`; None and why when it cannot be."""
+    """
+    The template repository at tag v<version>, unpacked into `scratch`; None and why when it cannot be. Read as
+    refs/tags/v<version>, never the bare name: a branch of that name would win, and a branch can move (Book D58).
+    """
     tag = f"v{version}"
-    code, _ = run(["git", "rev-parse", "--verify", "--quiet", f"{tag}^{{commit}}"], template_root, 60)
+    ref = f"refs/tags/{tag}"
+    code, _ = run(["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], template_root, 60)
     if code != 0:
         return None, f"the template repository has no tag {tag}"
     archive = scratch / "installed.tar"
-    code, out = run(["git", "archive", "--format=tar", "-o", str(archive), tag], template_root, 300)
+    code, out = run(["git", "archive", "--format=tar", "-o", str(archive), ref], template_root, 300)
     if code != 0 or not archive.is_file():
         return None, f"git archive {tag} failed: {(out.splitlines() or [''])[-1][:160]}"
     tree = scratch / "tree"
@@ -1435,6 +1531,79 @@ def classify(project: bytes | None, installed: bytes | None, new: bytes | None, 
     return CHANGED if same_text(installed, new) else CONFLICT
 
 
+def installed_values(manifest: dict, params: dict, packs: list[str], config: dict) -> dict:
+    """The values init filled a release's skeletons with, rebuilt from the project's settings."""
+    pairs = substitutions(manifest, params)
+    book = config.get("book") or {}
+    jira = config.get("jira") or {}
+    sources = (config.get("requirements") or {}).get("sources") or {}
+    values = dict(params, book_version=str(manifest.get("version") or ""), **pack_rows(manifest, packs, pairs),
+                  base_branch=str(config.get("base_ref") or "origin/dev").split("/", 1)[-1],
+                  protected_branches=list(config.get("protected_branches") or []),
+                  stack=str(book.get("stack") or "none"), packs=list(book.get("packs") or []),
+                  jira_site=str(jira.get("site") or ""), jira_key=str(jira.get("project") or ""),
+                  fsd_label=str(sources.get("fsd_link_label") or "FSD"), fsd_link="",
+                  ci_live=not bool((config.get("local_ci") or {}).get("required", True)))
+    rules = [rule for pack in packs for rule in ((manifest.get("packs") or {}).get(pack) or {}).get("features", [])]
+    values["pack_feature_rules"] = "".join(f"{rule.rstrip()}\n" for rule in rules)
+    return values
+
+
+def installed_settings(tree: Path, manifest: dict, params: dict, packs: list[str], config: dict) -> dict | None:
+    """The settings the installed release's init wrote (its factory.toml skeleton and each pack's additions,
+    filled as init filled them); None when they cannot be rebuilt."""
+    values = installed_values(manifest, params, packs, config)
+    # Before 1.6 init filled `{{review_scope}}` with the stack pack's own block, else the core one.
+    scopes = [tree / PACKS_DIR / pack / REVIEW_SCOPE for pack in packs] + [tree / SKELETONS_DIR / REVIEW_SCOPE]
+    scope = next((p.read_text(encoding="utf-8").strip() for p in scopes if p.is_file()), "")
+    skeleton = next((s for rel, s in skeleton_map(manifest, packs).items() if rel == CONFIG_RELATIVE), None)
+    if skeleton is None or not (tree / SKELETONS_DIR / skeleton).is_file():
+        return None
+    text = fill_skeleton((tree / SKELETONS_DIR / skeleton).read_text(encoding="utf-8").replace(
+        "{{review_scope}}", scope), values)
+    for pack in packs:
+        append = tree / PACKS_DIR / pack / APPEND
+        if append.is_file():
+            text += fill_skeleton(append.read_text(encoding="utf-8"), values)
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return None
+
+
+def installed_instructions(tree: Path, manifest: dict, params: dict, packs: list[str],
+                           old_files: dict[str, bytes], config: dict) -> dict[str, str]:
+    """The text the installed Book wrote into each instruction file: its skeletons as init filled them, and a
+    pack's nested CLAUDE.md, which the Book owned before 1.6."""
+    pairs = substitutions(manifest, params)
+    values = installed_values(manifest, params, packs, config)
+    found: dict[str, str] = {}
+    for rel, skeleton in skeleton_map(manifest, packs).items():
+        rel = renamed(rel, pairs)
+        if rel.endswith("CLAUDE.md"):
+            path = tree / SKELETONS_DIR / skeleton
+            if path.is_file():
+                found[rel] = fill_skeleton(path.read_text(encoding="utf-8"), values)
+    for rel, data in old_files.items():
+        if rel.endswith("CLAUDE.md") and not rel.startswith("devtools/"):
+            found.setdefault(rel, data.decode("utf-8", "replace"))
+    return found
+
+
+def write_lock(target: Path, files: dict[str, bytes]) -> bool:
+    """devtools/factory/book-files.lock: each Book-owned file the project carries, as the Book wrote it. False
+    when the lock already said exactly that."""
+    declined = book_config.declined_files(book_config.load(target).get("book") or {}) \
+        if (target / CONFIG_RELATIVE).is_file() else set()
+    path = target / book_config.LOCK
+    text = book_config.lock_text({rel: data for rel, data in files.items() if rel not in declined})
+    if path.is_file() and path.read_text(encoding="utf-8") == text:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return True
+
+
 def stamp_version(path: Path, version: str) -> None:
     """Set factory.toml's top-level book_version, keeping every other byte and the file's line endings."""
     text = path.read_bytes().decode("utf-8")
@@ -1452,11 +1621,42 @@ def stamp_version(path: Path, version: str) -> None:
     path.write_bytes(text.encode("utf-8"))
 
 
+def set_book_key(path: Path, key: str, value: str | list[str] | None) -> None:
+    """Set (or, with None, remove) a one-line key of factory.toml's [book] table, keeping every other byte."""
+    text = path.read_bytes().decode("utf-8")
+    newline = "\r\n" if "\r\n" in text else "\n"
+    lines = text.split(newline)
+    start = next((i for i, l in enumerate(lines) if re.fullmatch(r"\[book\][ \t]*(#.*)?", l.strip())), None)
+    if start is None:
+        if value is None:
+            return
+        lines += ["[book]"]
+        start = len(lines) - 1
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("[")), len(lines))
+    at = next((i for i in range(start + 1, end) if re.match(rf"^{re.escape(key)}[ \t]*=", lines[i])), None)
+    line = None if value is None else f"{key} = {json.dumps(value)}"
+    if at is not None:
+        lines[at:at + 1] = [] if line is None else [line]
+    elif line is not None:
+        lines.insert(start + 1, line)
+    path.write_bytes(newline.join(lines).encode("utf-8"))
+
+
+def pending_merge(config: dict, new_version: str) -> list[str] | None:
+    """The files an earlier --apply to `new_version` left to merge by hand, or None when none was recorded."""
+    book_table = config.get("book") or {}
+    if str(book_table.get(PENDING_FOR) or "") != new_version:
+        return None
+    return [str(rel) for rel in book_table.get(PENDING_MERGE) or []]
+
+
 def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, apply: bool = False,
-            run: Runner = real_runner) -> tuple[str, bool]:
+            run: Runner = real_runner, diffs_path: Path | None = None) -> tuple[str, bool]:
     """
     The drift report (read-only) and, with `apply`, the update: every file the template owns is compared
-    with the installed version and the new one; only files the project has not changed are written.
+    with the installed version and the new one; only files the project has not changed are written. The report
+    shows the diffs a person decides on; the BEHIND and NEW ones go to `diffs_path` (else a file in the system's
+    temporary folder), which it names.
     """
     if target.resolve() == template_root.resolve():
         raise BookError("The template cannot upgrade itself: run `book upgrade --target <project>` from the "
@@ -1479,6 +1679,9 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
     notes: list[str] = []
     with tempfile.TemporaryDirectory(prefix="book-upgrade-") as scratch:
         old_files: dict[str, bytes] = {}
+        old_instructions: dict[str, str] = {}
+        old_comments: set[str] = set()
+        old_settings: dict | None = None
         known = False
         if installed:
             tree, why = installed_tree(template_root, installed, Path(scratch), run)
@@ -1490,8 +1693,15 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
                 if not old_manifest:
                     notes.append(f"{COULD_NOT} the installed version {installed}: {why} holds no manifest.toml")
                 else:
-                    old_files = owned_files(tree, old_manifest, params, packs)
+                    old_files = owned_then(owned_files(tree, old_manifest, params, packs), installed)
                     known = True
+                    old_instructions = installed_instructions(tree, old_manifest, params, packs, old_files, config)
+                    old_settings = installed_settings(tree, old_manifest, params, packs, config)
+                    # The installed template's settings comments: the 1.6 split drops only these with a key.
+                    old_comments = book_migrate.template_comments([
+                        path.read_text(encoding="utf-8", errors="replace")
+                        for path in (tree / "devtools/factory/book-template").rglob("*")
+                        if path.name in ("factory.toml.tmpl", "factory-append.toml")])
         else:
             notes.append(f"{COULD_NOT} the installed version: {where} - every file that differs from the new "
                          "template is kept, for a person")
@@ -1501,44 +1711,124 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
         notes.append(f"{WRONG} [book] has no {' or '.join(unrecorded)}: no pack file is compared or written - add "
                      "what this Book installed (`stack = \"dotnet\"`, `packs = [\"fe-guides\"]`), then run again")
     # A pack file the project chose not to carry (its own script does the job): `[book] declined`.
-    declined = set((config.get("book") or {}).get("declined") or [])
+    declined = book_config.declined_files(config.get("book") or {})
     stale = sorted(declined - set(new_files) - set(old_files))
     if stale:
         notes.append(f"{WRONG} [book] declined names {len(stale)} file(s) the template does not own: "
                      f"{', '.join(stale)} - remove them from the list")
+    notes += [f"{WRONG} {problem}" for problem in book_config.declined_problems(config)]
     rows: list[tuple[str, str]] = []
-    diffs: list[str] = []
+    diffs: list[str] = []    # what a person decides on: shown in the report
+    routine: list[str] = []  # BEHIND and NEW, which --apply takes: written to a file the report names
     unoffered: list[str] = []
+    pending = pending_merge(config, new_version)
     for rel in sorted(set(new_files) | set(old_files)):
         current = target / rel
         project = current.read_bytes() if current.is_file() else None
         status = DECLINED if rel in declined else classify(project, old_files.get(rel), new_files.get(rel), known)
+        if status in (CONFLICT, REMOVED) and pending is not None and rel not in pending:
+            status = RESOLVED  # a person merged it, or chose its absence, and took it off the list
         if status == NEW and known and rel.startswith(".claude/skills/") and is_rename_stub(new_files[rel]):
             # A stub keeps an old name working; a name the installed version never had needs none.
             unoffered.append(rel)
             continue
+        if (status == DROPPED and rel.startswith(TEMPLATE_COPY) and known
+                and same_text(project, old_files.get(rel))):
+            status = RETIRED  # the Book's own template copy, unchanged and read by nothing: --apply removes it
         rows.append((status, rel))
-        if status in (BEHIND, NEW, UNKNOWN):
+        if status in (BEHIND, NEW):
+            routine.append(diff(rel, project, new_files[rel], "project", f"template {new_version}"))
+        elif status == UNKNOWN:
             diffs.append(diff(rel, project, new_files[rel], "project", f"template {new_version}"))
+        elif status == CHANGED:
+            diffs.append(f"# {rel}: the project changed it and the template did not; it is kept. The project's "
+                         "change:\n" + diff(rel, old_files[rel], project, f"template {installed}", "project"))
         elif status == CONFLICT:
             diffs.append(f"# {rel}: the project changed it, so it is kept. What the template changed, to "
                          "carry over by hand:\n" +
                          diff(rel, old_files[rel], new_files[rel], f"template {installed}", f"template {new_version}"))
+    offers, read_me_notes = requirements_read_me_offers(target, manifest, template_root, params, packs)
+    for rel, (project, renamed_text) in offers.items():
+        new_files[rel] = renamed_text
+        rows.append((BEHIND, rel))
+        routine.append(diff(rel, project, renamed_text, "project", f"template {new_version}"))
+    notes += read_me_notes
     notes += must_merge_notes(rows)
     notes += old_command_notes(target, rows)
     notes += long_lived_notes(target, config, run)
-    notes += plugin_notes(target, config, manifest, rows)
+    # Worked out again after --apply when it writes .claude/settings.json, so the run never names the old pin
+    # (Book D57).
+    plugin_at, plugin = len(notes), plugin_notes(target, config, manifest, rows)
+    notes += plugin
     notes += fe_guides_notes(target, config)
+    notes += pack_skeleton_notes(target, manifest, packs, skipped_skeletons(config),
+                                 substitutions(manifest, params))
     notes += deploy_notes(config)
     if unoffered:
         notes.append(f"{len(unoffered)} rename stub(s) not offered: the installed version had none of these old "
                      f"names ({', '.join(sorted(rel.split('/')[2] for rel in unoffered))})")
+    unmerged = [rel for status, rel in rows if status in (CONFLICT, REMOVED)]
+    if pending is not None and unmerged:
+        notes.append(f"{WRONG} {len(unmerged)} file(s) an earlier --apply left to merge by hand ([book] "
+                     f"{PENDING_MERGE}): {', '.join(unmerged)} - book_version stays {installed} until each is "
+                     "merged (CONFLICT: carry over the template's change below) or settled (REMOVED), and taken "
+                     f"off the list (keep [book] {PENDING_FOR}: without it every file is listed again); then run "
+                     "--apply again")
+    moves: dict[str, bytes] = {}
+    if book_migrate.applies(installed, new_version):
+        # Each Book file the project changed is kept, and accepted for now, so the drift check does not fail the
+        # first commit after the upgrade; the project's files lose what is the Book's (book_migrate).
+        accepted = [rel for status, rel in rows if status in (CHANGED, CONFLICT)]
+        # The new skeletons, as init would fill them: a section they keep in the project's file stays there.
+        new_skeletons = {rel: text for rel, text in installed_instructions(
+            template_root, manifest, params, packs, {}, config).items()}
+        moves, move_notes = book_migrate.plan(target, config, old_instructions, new_files, params["name"], accepted,
+                                              skeletons=new_skeletons, comments=old_comments,
+                                              installed_settings=old_settings)
+        # A file the move would leave as it is (a re-run after the split) is no move: no diff, nothing written.
+        moves = {rel: data for rel, data in moves.items()
+                 if not ((target / rel).is_file() and (target / rel).read_bytes().replace(b"\r\n", b"\n") == data)}
+        # A nested CLAUDE.md the Book owned and 1.6 makes a skeleton is the project's file from now on: the move
+        # writes it (or already has), importing the Book's rules, so it is never one to delete (DROPPED).
+        rows = [(SPLIT if status == DROPPED and (rel in moves or imports_book_rules(target / rel)) else status, rel)
+                for status, rel in rows]
+        notes += move_notes
+        for rel, data in moves.items():  # what the 1.6 move takes out of each file: a person reads this
+            if rel == book_migrate.REGISTER_KEEP:
+                continue
+            current = target / rel
+            diffs.append(f"# {rel}: the 1.6 move (SPLIT) - what goes to the Book's files, and what stays:\n"
+                         + diff(rel, current.read_bytes() if current.is_file() else None, data, "project",
+                                "after the move"))
+        if not old_instructions:
+            notes.append(f"  {CONFIRM} the installed Book's instruction files could not be rebuilt: only the text of "
+                         "the Book's new rules files counts as the Book's")
     counts = {s: sum(r[0] == s for r in rows)
-              for s in (CURRENT, BEHIND, NEW, CHANGED, CONFLICT, REMOVED, DROPPED, UNKNOWN, DECLINED)}
-    mode = "--apply" if apply else "report only, nothing written (--apply updates the BEHIND and NEW files)"
-    head = (f"book upgrade - installed {installed or 'unknown'}, template {new_version} - {mode}\n"
+              for s in (CURRENT, BEHIND, NEW, CHANGED, RESOLVED, CONFLICT, REMOVED, DROPPED, RETIRED, SPLIT, UNKNOWN,
+                        DECLINED)}
+    retired = [rel for status, rel in rows if status == RETIRED]
+    if retired:
+        notes.append(f"{len(retired)} file(s) of the Book's own template copy ({TEMPLATE_COPY}) the new template no "
+                     "longer has, unchanged and read by nothing here: " + ("removed (staged)" if apply else
+                                                                           "--apply removes them (RETIRED below)"))
+    diffs_at = ""
+    if routine:
+        # One file per checkout: two with the same folder name never share it.
+        unique = hashlib.sha256(str(target.resolve()).encode("utf-8")).hexdigest()[:8]
+        where = diffs_path or Path(tempfile.gettempdir()) / f"book-upgrade-{target.name}-{unique}-{new_version}.diff"
+        try:
+            where.write_text("".join(routine), encoding="utf-8", newline="\n")
+            diffs_at = f"; the BEHIND and NEW diffs are written to {where}"
+            notes.append(f"The BEHIND and NEW diffs ({len(routine)} file(s), which --apply takes without a "
+                         f"decision): {where}")
+        except OSError as error:
+            notes.append(f"{WRONG} could not write the BEHIND and NEW diffs to {where}: {error}")
+    mode = "--apply" if apply else ("report only, nothing written in the project (--apply updates the BEHIND and "
+                                    "NEW files)")
+    head = (f"book upgrade - installed {installed or 'unknown'}, template {new_version} - {mode}{diffs_at}\n"
             + " · ".join(f"{n} {s.lower()}" for s, n in counts.items() if n))
-    out = [head, *notes, ""] + [f"{status:<9} {rel}" for status, rel in rows]
+    # Each file a person must act on is listed once, under "For a person"; the rest here.
+    out = [head, *notes, ""] + [f"{status:<9} {rel}" for status, rel in rows if status not in FOR_A_PERSON]
     written: list[str] = []
     created: list[str] = []
     if apply:
@@ -1549,6 +1839,8 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(new_files[rel])
             (created if status == NEW else written).append(rel)
+        if ".claude/settings.json" in written + created:
+            out[1 + plugin_at:1 + plugin_at + len(plugin)] = plugin_notes(target, config, manifest, rows)
         if created:
             code, text = run(["git", "add", "--", *created], target, 120)
             if code != 0:
@@ -1558,16 +1850,124 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
                 bits = [rel for rel in created if rel in executable or rel.endswith(".sh")]
                 if bits:
                     run(["git", "update-index", "--chmod=+x", "--", *bits], target, 120)
-        stamp_version(target / CONFIG_RELATIVE, new_version)
-        out += ["", f"Updated {len(written)}, created {len(created)} (staged); {CONFIG_RELATIVE} book_version "
-                f"{installed or 'unknown'} -> {new_version}. Review `git diff` and commit."]
+        for rel, data in moves.items():
+            (target / rel).parent.mkdir(parents=True, exist_ok=True)
+            (target / rel).write_bytes(data)
+            written.append(rel)
+        if book_migrate.REGISTER_KEEP in moves:
+            run(["git", "add", "--", book_migrate.REGISTER_KEEP], target, 60)
+        if retired:
+            code, text = run(["git", "rm", "-q", "--", *retired], target, 120)
+            if code != 0:
+                out.append(f"{WRONG} git rm the retired template files: {(text.splitlines() or [''])[-1][:160]}")
+        # What the Book wrote, for check-book's drift check: the files it owns as this version renders them.
+        write_lock(target, new_files)
+        run(["git", "add", "--", book_config.LOCK], target, 60)
+        config_path = target / CONFIG_RELATIVE
+        if unmerged:
+            # The installed version stays the record (a Book from before the stamp gets it written now, as its
+            # copied manifest was just updated), so the template's change is still there to merge.
+            stamp_version(config_path, installed)
+            set_book_key(config_path, PENDING_FOR, new_version)
+            set_book_key(config_path, PENDING_MERGE, unmerged)
+            out += ["", f"Updated {len(written)}, created {len(created)} (staged); {CONFIG_RELATIVE} book_version "
+                    f"stays {installed}: {len(unmerged)} file(s) to merge by hand are listed in [book] "
+                    f"{PENDING_MERGE}. Merge each, take it off the list (leave [book] {PENDING_FOR} as it is: "
+                    "without it the next run lists them all again), then run --apply again. Review `git diff` "
+                    "and commit."]
+        else:
+            stamp_version(config_path, new_version)
+            set_book_key(config_path, PENDING_MERGE, None)
+            set_book_key(config_path, PENDING_FOR, None)
+            out += ["", f"Updated {len(written)}, created {len(created)} (staged); {CONFIG_RELATIVE} book_version "
+                    f"{installed or 'unknown'} -> {new_version}. Review `git diff` and commit."]
     kept = [(s, r) for s, r in rows if s in FOR_A_PERSON]
     if kept:
         out += ["", "For a person (never overwritten or deleted by upgrade):",
-                *[f"  {s:<9} {r}" for s, r in kept]]
+                *[f"{s:<9} {r}" for s, r in kept]]
     if diffs:
-        out += ["", "Diffs:", "", *diffs]
+        out += ["", "Diffs to decide on (CONFLICT, CHANGED, UNKNOWN and the 1.6 move):", "", *diffs]
     return "\n".join(out).rstrip() + "\n", True
+
+
+# The skill names retired in v1.3-v1.5 (the AI guide's *Old names*), as a requirements read-me written before
+# then still names them. Only hyphenated names: none is an English phrase or another name's part.
+OLD_SKILL_NAMES = {
+    "requirements-check": "book:check-sources", "requirements-sync": "book:sync-sources",
+    "api-contract-draft": "book:outline-api", "change-impact": "book:impact", "project-progress": "book:progress",
+    "review-branch": "book:self-review", "review-pr": "book:peer-review", "fsd-audit": "book:fact-check",
+    "docs-vs-code": "book:check-docs", "docs-update-from-code": "book:update-docs",
+    "docs-consistency": "book:check-consistency", "docs-trim": "book:trim", "book-setup": "book:setup",
+    "plan-feature": "book:plan", "book-upgrade": "book:upgrade", "deploy-dev-qa": "book:deploy",
+    "fe-guides-check": "book:check-guides", "fe-guides-publish": "book:publish-guides",
+}
+# A name on its own, with or without its slash: never inside a path or a longer name (`chore/book-setup-x`).
+OLD_SKILL_NAME = re.compile(r"(?<![\w/:.-])(/?)(" + "|".join(sorted(map(re.escape, OLD_SKILL_NAMES), key=len,
+                                                                     reverse=True)) + r")(?![\w-])")
+REQUIREMENTS_READ_ME = ("requirements/read-me.txt", "requirements/**/read-me.txt")
+
+
+def new_skill_names(text: str) -> str:
+    return OLD_SKILL_NAME.sub(lambda m: m.group(1) + OLD_SKILL_NAMES[m.group(2)], text)
+
+
+def read_me_shape(text: str) -> str:
+    """A requirements read-me with what a project may edit in it masked: the LINKS block and each Last checked
+    paragraph (the edits /book:check-sources makes), so what is left is the template's own text."""
+    out, masked = [], False
+    for line in text.replace("\r\n", "\n").split("\n"):
+        if line.startswith("=== "):
+            masked = line.startswith("=== LINKS")
+            out.append(line if not masked else "=== LINKS ===")
+            continue
+        if line.startswith("Last checked:"):
+            masked = True
+            out.append("Last checked:")
+            continue
+        if masked and not line.strip() and out and out[-1] == "Last checked:":
+            masked = False
+        if not masked:
+            out.append(line.rstrip())
+    return "\n".join(out).strip()
+
+
+def requirements_read_me_offers(target: Path, manifest: dict, template_root: Path, params: dict,
+                                packs: list[str]) -> tuple[dict[str, tuple[bytes, bytes]], list[str]]:
+    """
+    The requirements read-me files that still name an old skill (Book D47). They are the project's own (a skeleton's
+    target), so upgrade never compares them; but one that is the skeleton with only its LINKS and Last checked lines
+    edited is offered BEHIND, its old names renamed and nothing else changed. A copy the project wrote more of is
+    named for a person, line by line.
+    """
+    skeletons = {rel: skeleton for rel, skeleton in skeleton_map(manifest, packs).items()
+                 if any(fnmatch.fnmatch(rel, p) for p in REQUIREMENTS_READ_ME)}
+    values = {key: str(params.get(key) or "") for key in ("name", "title", "slug", "env_prefix")}
+    offers: dict[str, tuple[bytes, bytes]] = {}
+    by_hand: list[str] = []
+    folder = target / "requirements"
+    found = sorted(p.relative_to(target).as_posix() for p in folder.rglob("read-me.txt")) if folder.is_dir() else []
+    for rel in found:
+        project = (target / rel).read_bytes()
+        text = project.decode("utf-8", "replace")
+        renamed_text = new_skill_names(text)
+        if renamed_text == text:
+            continue
+        skeleton = template_root / SKELETONS_DIR / skeletons[rel] if rel in skeletons else None
+        if skeleton is not None and skeleton.is_file():
+            shape = re.sub(r"\{\{(\w+)\}\}", lambda m: values.get(m.group(1), m.group(0)),
+                           skeleton.read_text(encoding="utf-8"))
+            if read_me_shape(renamed_text) == read_me_shape(shape):
+                offers[rel] = (project, renamed_text.encode("utf-8"))
+                continue
+        lines = [str(n) for n, line in enumerate(text.splitlines(), 1) if OLD_SKILL_NAME.search(line)]
+        by_hand.append(f"{rel} (line{'s' if len(lines) > 1 else ''} {', '.join(lines)})")
+    notes = []
+    if by_hand:
+        notes.append(f"{CONFIRM} {len(by_hand)} requirements read-me file(s) the project wrote its own text into still "
+                     f"name an old skill: {'; '.join(by_hand)} - rename each by hand in a pull request "
+                     "(`/requirements-check` -> `/book:check-sources`, whose capture step is still Phase 4 - Capture; "
+                     "the rest in the AI guide's *Old names*); a read-me may be edited in place")
+    return offers, notes
 
 
 OLD_REVIEW_FOLDER = ".claude/skills/review-pr/references"
@@ -1665,6 +2065,33 @@ def fe_guides_notes(target: Path, config: dict) -> list[str]:
             "project's reason, otherwise give them a guide"]
 
 
+def imports_book_rules(path: Path) -> bool:
+    """Whether an instruction file imports the Book's rules (`@…/.claude/book/…` on a line of its own)."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return any(".claude/book/" in rel for rel in book_config.imports(text))
+
+
+def pack_skeleton_notes(target: Path, manifest: dict, packs: list[str], skipped: set[str] = frozenset(),
+                        pairs: list[tuple[str, str]] = ()) -> list[str]:
+    """
+    A pack's skeleton the project lacks (Book D44): a skeleton's target is the project's own content, so upgrade
+    never writes one, but `book verify` reports it MISSING; a person fills it from the skeleton. Its path takes
+    the project's names (`src/<Name>.API/`), as init wrote it.
+    """
+    notes = []
+    for pack in packs:
+        skeletons = ((manifest.get("packs") or {}).get(pack) or {}).get("skeletons", {})
+        for rel, skeleton in sorted(skeletons.items()):
+            rel = renamed(rel, list(pairs))
+            if not (target / rel).is_file() and rel not in skipped:
+                notes.append(f"{MISSING} {rel}: the {pack} pack's document, which `book verify` asks for - start "
+                             f"it from {SKELETONS_DIR}/{skeleton} and fill its slots in a pull request")
+    return notes
+
+
 def plugin_notes(target: Path, config: dict, manifest: dict, rows: list[tuple[str, str]]) -> list[str]:
     """
     What a Book moving onto the book plugin (v1.3.0) must do by hand, since upgrade never writes a file the
@@ -1699,8 +2126,8 @@ def plugin_notes(target: Path, config: dict, manifest: dict, rows: list[tuple[st
                          "in the same pull request")
     if (config.get("review_scope") or {}).get("folder") == OLD_REVIEW_FOLDER:
         notes.append(f"{WRONG} factory.toml [review_scope] still reads {OLD_REVIEW_FOLDER}/: replace its `folder`, "
-                     "`always` and `[review_scope.dimensions]` with the template's (the stack pack's "
-                     "review-scope.toml, or skeletons/review-scope.toml) - the method, Pass A and B0 are the "
+                     "`always` and `[review_scope.dimensions]` (or delete them: the stack's defaults file, "
+                     "devtools/factory/book-defaults/<stack>.toml, holds the template's) - the method, Pass A and B0 are the "
                      "plugin's `book:peer-review/references/` files now")
     # A rename stub kept from v1.3.0 or v1.4.0 (DROPPED: v1.5 retires the old names) is its own note: it holds
     # nothing to carry over. So is the copy of a pack's stub in the project's own book-template/.
@@ -1883,16 +2310,21 @@ def executable_in_template(template_root: Path, manifest: dict, params: dict, pa
 # ---------------------------------------------------------------- the command
 
 
-def add_parser(sub) -> None:
-    book = sub.add_parser("book", allow_abbrev=False,
+def add_parser(sub, prog: str = "book") -> None:
+    # Its own prog: devtools/book.py runs `book upgrade` as `book book upgrade`, whose usage line said so (Book D50).
+    book = sub.add_parser("book", prog=prog, allow_abbrev=False,
                           help="the Book: verify it is set up (read-only), init what is absent, or upgrade it")
-    book.add_argument("step", choices=["verify", "init", "upgrade"])
+    book.add_argument("step", choices=["verify", "init", "upgrade", "defects"])
+    book.add_argument("action", nargs="?", default="", help="defects: `classify` - propose each open defect's "
+                      "Type and Source (report-first; --apply writes the columns)")
     book.add_argument("--target", default="", help="the repository; default: this one")
     book.add_argument("--params", default="", help="init: the parameter file (default <target>/book.toml)")
     book.add_argument("--no-verify", action="store_true", help="init: stop after creating; do not run verify")
     book.add_argument("--no-self-tests", action="store_true", help="verify: skip the self-test suites (reported, never passed)")
     book.add_argument("--apply", action="store_true",
                       help="upgrade: update the files the project has not changed, and bump book_version")
+    book.add_argument("--diffs", default="", help="upgrade: the file for the BEHIND and NEW diffs, which --apply "
+                      "takes without a decision (default: one in the system's temporary folder, named in the report)")
 
 
 def main(root: Path, config_raw: dict, args, private: dict | None = None, run: Runner = real_runner) -> tuple[str, bool]:
@@ -1900,7 +2332,12 @@ def main(root: Path, config_raw: dict, args, private: dict | None = None, run: R
     manifest = load_manifest()
     same = target.resolve() == root.resolve()
     if args.step == "upgrade":
-        return upgrade(target, load_target_config(target), manifest, HERE.parents[1], args.apply, run)
+        diffs = Path(args.diffs).resolve() if getattr(args, "diffs", "") else None
+        return upgrade(target, load_target_config(target), manifest, HERE.parents[1], args.apply, run, diffs)
+    if args.step == "defects":
+        if args.action != "classify":
+            raise BookError("`book defects classify [--apply]` is the one defects step.")
+        return book_migrate.classify_command(target, args.apply)
     if args.step == "init":
         params = load_params(Path(args.params) if args.params else target / "book.toml")
         text, ok = init(target, params, manifest, HERE.parents[1], run)

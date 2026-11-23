@@ -1,4 +1,4 @@
-# B2 · Code Quality & Maintainability — checks 34–48
+# B2 · Code Quality & Maintainability — checks 34–48, 161
 
 Part of the review checklist; its method is `review-method.md`, in the book plugin (`book:peer-review/references/`).
 
@@ -19,3 +19,4 @@ Part of the review checklist; its method is `review-method.md`, in the book plug
 | 46 | Inconsistent coding patterns | LINQ is method syntax only, never query syntax; `Single`/`SingleOrDefault` over `First`/`FirstOrDefault` unless more than one match is legitimate and the query is explicitly ordered |
 | 47 | Poor separation of concerns | **`Never Helper`, `Manager`, `Processor`, `Utility`, `DataService`, `CommonService`, no `Common/` folder** — these names are a symptom of unassigned responsibility |
 | 48 | Code difficult to safely modify or extend | Would a reasonable next change require touching many unrelated places? |
+| 161 | Code the requirement did not ask for | An option, setting, parameter or extension point no criterion needs; a wrapper that only renames a library call; a "while I was here" change outside the Spec's scope. Name the criterion it serves, or it is a finding — the fix is to delete it, or to take it to its own tracked change |

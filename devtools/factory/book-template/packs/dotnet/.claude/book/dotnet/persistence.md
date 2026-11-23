@@ -1,8 +1,10 @@
 # Persistence — database and migration rules
 
+The Book's rules for this folder, the same in every project with the dotnet pack: the folder's `CLAUDE.md` imports this file and holds only the project's own beside it. **This file is the Book's** — `book upgrade` replaces it, and check-book fails when a project's copy differs.
+
 Loaded when you work under `src/Boilerplate.Persistence/`. The root
-[`CLAUDE.md`](../../CLAUDE.md) still applies; the reasoning is in
-[`docs/architecture.md` §6](../../docs/architecture.md#6-database).
+[`CLAUDE.md`](../../../CLAUDE.md) still applies; the reasoning is in
+[`docs/architecture.md` §6](../../../docs/architecture.md#6-database).
 
 ## Schema changes
 

@@ -6,6 +6,8 @@ Self-tests for the dotnet pack's checks, beside the Book's own in test_checks.py
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import re
 import shutil
@@ -685,6 +687,46 @@ class ApiContractResponseSchemaTests(ApiContractFixtureCase):
         self.assertIn("- [Response schemas](#response-schemas)", text)
 
 
+class ApiContractGreenfieldTests(ApiContractFixtureCase):
+    """A Book with no API project yet: `--check` (the pre-commit hook's) passes, as there is nothing to describe."""
+
+    def run_generator(self, *args: str) -> tuple[int, str]:
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["gen-api-contracts.py", *args]), contextlib.redirect_stdout(out):
+            code = api_contracts.main()
+        return code, out.getvalue()
+
+    def test_no_permissions_file_and_no_api_source_is_not_applicable(self):
+        shutil.rmtree(self.root / "src")
+        for args in (("--check",), ()):
+            with self.subTest(args):
+                code, out = self.run_generator(*args)
+                self.assertEqual(code, 0)
+                self.assertIn("N/A, no Permissions.cs yet", out)
+                self.assertFalse((self.root / "docs").exists(), "nothing written")
+
+    def test_the_erd_has_no_model_snapshot_yet_and_is_not_applicable(self):
+        erd = load("gen-database-erd")
+        snapshot = self.root / "src" / "App.Persistence" / "Migrations" / "ApplicationDbContextModelSnapshot.cs"
+        with mock.patch.object(erd, "ROOT", self.root), mock.patch.object(erd, "SNAPSHOT", snapshot):
+            out = io.StringIO()
+            with mock.patch.object(sys, "argv", ["gen-database-erd.py", "--check"]), contextlib.redirect_stdout(out):
+                self.assertEqual(erd.main(), 0)
+            self.assertIn("N/A, no model snapshot yet", out.getvalue())
+            # Persistence code with no snapshot is a lost snapshot, not a greenfield Book.
+            self.write("src/App.Persistence/ApplicationDbContext.cs", "public class ApplicationDbContext { }\n")
+            with mock.patch.object(sys, "argv", ["gen-database-erd.py", "--check"]), \
+                    self.assertRaises(SystemExit) as raised:
+                erd.main()
+            self.assertIn("model snapshot not found", str(raised.exception))
+
+    def test_api_source_without_its_permissions_file_is_named(self):
+        self.write("src/App.API/Endpoints/WidgetEndpoints.cs", "public static class WidgetEndpoints { }\n")
+        with self.assertRaises(SystemExit) as raised:
+            self.run_generator("--check")
+        self.assertIn("src/App.Application/Permissions.cs is missing", str(raised.exception))
+
+
 class ApiContractUnversionedRouteTests(ApiContractFixtureCase):
     """A route mapped on the root app in any API file reaches the contracts, and a registration the
     generator cannot parse stops the run (routes under Configuration/ were once missing from the doc)."""
@@ -961,3 +1003,34 @@ class ApiContractRepositoryRoutesTests(ApiContractFixtureCase):
             groups, _, _ = api_contracts.collect()
         self.assertIn("Widgets — Gadgets & Gizmos", [g.heading for g in groups])
 
+
+
+class DatabaseErdSettingsTests(unittest.TestCase):
+    """The ERD's module headings, scoping wording and added notes are settings, not edits to the generator."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.erd = load("gen-database-erd")
+
+    def settings(self, text: str) -> dict:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "devtools" / "factory").mkdir(parents=True)
+            (root / "devtools" / "factory" / "factory.toml").write_text(text, encoding="utf-8")
+            return self.erd.erd_settings(root)
+
+    def test_titles_and_notes_come_from_the_settings(self):
+        found = self.settings('[database_erd]\ntitles = { Widgets = "Gadget widgets" }\nnotes = ["Every table has x."]\n')
+        self.assertEqual(found, {"titles": {"Widgets": "Gadget widgets"}, "notes": ["Every table has x."]})
+        self.assertEqual(self.settings("[book]\nname = 'x'\n"), {"titles": {}, "notes": []})
+
+    def test_a_title_setting_wins_over_the_split_name(self):
+        with mock.patch.object(self.erd, "ERD_SETTINGS", {"titles": {"Widgets": "Gadget widgets"}, "notes": []}):
+            self.assertEqual(self.erd.module_title("Widgets"), "Gadget widgets")
+        self.assertEqual(self.erd.module_title("ReferenceLists"), "Reference lists")
+
+    def test_the_scoping_words_name_the_scoping_word(self):
+        with mock.patch.object(self.erd, "SCOPING_COLUMN", "store_id"):
+            self.assertEqual(self.erd.scoping_words(), "tenancy, store scoping")
+        with mock.patch.object(self.erd, "SCOPING_COLUMN", ""):
+            self.assertEqual(self.erd.scoping_words(), "tenancy, scoping")

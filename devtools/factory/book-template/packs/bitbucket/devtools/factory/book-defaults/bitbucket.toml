@@ -1,0 +1,6 @@
+# The Book's defaults for the bitbucket pack: the CI file the checks read. Read after book-defaults.toml when
+# `[book] packs` names bitbucket. The Book's file, like book-defaults.toml: change a value in factory.toml,
+# never here.
+
+[checks]
+ci_files = ["bitbucket-pipelines.yml"]

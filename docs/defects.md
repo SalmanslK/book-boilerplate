@@ -4,7 +4,7 @@
 
 What is wrong with what we built, from any source. **Open rows are in full; fixed ones are one line
 each**, with the full row in [`archive/defects-closed.md`](archive/defects-closed.md). How to write a
-row, and when a finding is not a defect: [`docs/CLAUDE.md`](CLAUDE.md#defects).
+row, and when a finding is not a defect: [the Book's rules for documents](../.claude/book/docs.md#defects).
 
 **Status** (open rows): `Open` · `Mitigated` (harm contained, cause remains) · `Partial` (part fixed) ·
 `Blocked — <Q id or party>`.
@@ -18,14 +18,14 @@ row, and when a finding is not a defect: [`docs/CLAUDE.md`](CLAUDE.md#defects).
 
 ## Open
 
-| Id | Sev | Status | Defect | Where | Found by | Note |
-|---|---|---|---|---|---|---|
+| Id | Sev | Status | Type | Source | Defect | Where | Note |
+|---|---|---|---|---|---|---|---|
 
 None open.
 
 ### Numbering
 
-Ids are `D<n>`, never reused; how to take one is [`docs/CLAUDE.md`](CLAUDE.md#ids--d-q).
+Ids are `D<n>`, never reused; how to take one is [the Book's rules for documents](../.claude/book/docs.md#ids--d-q).
 
 ## Fixed
 
@@ -72,3 +72,54 @@ One line per fixed defect: id, what it was, and the commit or release that fixed
 - **D39** — the book plugin was not pinned to a release, so each plugin release reached projects unreviewed, and no check tied the plugin's version to the template's. Fixed in v1.3.4.
 - **D40** — the copied `ShippedTextTests` failed a project on its own defect ids in template-owned files it keeps changed. Fixed in v1.4.1.
 - **D41** — the guard refused `book deploy revert --to <sha>`, reading `--to` as an abbreviated `--target`. Fixed in v1.5.0.
+- **D42** — `book impact` said "Nothing changed" for paths that reach nothing. Fixed in v1.5.1.
+- **D43** — `book impact` printed `../../../` links in the terminal. Fixed in v1.5.1.
+- **D44** — upgrade never offered the FE guide template, and verify did not ask for the fe-guides pack's docs. Fixed in v1.5.1.
+- **D45** — devtools scripts failed on an em dash under a Windows console's code page. Fixed in v1.5.1.
+- **D46** — the `factory.toml` skeleton said factory.py reads it. Fixed in v1.5.1.
+- **D47** — requirements read-me files kept old skill names, and upgrade never offered the new ones. Fixed in v1.5.1.
+- **D48** — the Cursor rule said the skills live under `.claude/skills/`. Fixed in v1.5.1.
+- **D49** — nothing said the plugin install reorders `.claude/settings.json`. Fixed in v1.5.1.
+- **D50** — `book upgrade --help` printed `usage: book book`. Fixed in v1.5.1.
+- **D51** — check-book let an open question carry the template's recommendation heading in place of the project's. Fixed in v1.5.1.
+- **D52** — the dotnet pack's review checklist lacked check 161. Fixed in v1.5.1.
+- **D53** — the guard missed shortened and combined `git push` delete, force, `--all` and `--mirror` flags. Fixed in v1.5.1.
+- **D54** — the guard let a local branch be deleted by `update-ref -d`, or a protected one moved by `branch -f`, `-m`, `-M` or `update-ref`. Fixed in v1.5.1.
+- **D55** — the guard did not judge a deploy started by `-c` code that runs `book.py` other than through `runpy`. Fixed in v1.5.1.
+- **D56** — `book upgrade --apply` recorded the new version over an unmerged CONFLICT, which the next report then hid. Fixed in v1.5.1.
+- **D57** — the upgrade named the old plugin pin in the run that had just moved it. Fixed in v1.5.1.
+- **D58** — upgrade and the plugin's id lookup resolved a release by its bare name, which a branch of that name could answer. Fixed in v1.5.1.
+- **D59** — a fresh dotnet Book's first commit was refused by the contracts and ERD generators and by the protected-paths check. Fixed in v1.5.1.
+- **D60** — book plugin skills gave commands their `allowed-tools` did not pre-approve (plugin v0.6.1). Fixed in v1.5.1.
+- **D61** — `book verify` failed every defect row in the 1.6 shape, which check-book accepts. Fixed in v1.6.0.
+- **D62** — `book requirements import` let a second audit section for a module overwrite the first. Fixed in v1.6.0.
+- **D63** — a deleted Book defaults file silently emptied the guard's read-only and ask lists, and the drift check did not see it. Fixed in v1.6.0.
+- **D64** — `book defects classify` split a cell on an escaped pipe or one in a code span, shifting the row's columns. Fixed in v1.6.0.
+- **D65** — the 1.6 settings split deleted a project's own comment above a key equal to its default. Fixed in v1.6.0.
+- **D66** — the 1.6 move's report claimed keys it did not add, and its split left lines above the import and an empty parent table. Fixed in v1.6.0.
+- **D67** — the upgrade called the dotnet nested `CLAUDE.md` files DROPPED and named the template's paths as MISSING. Fixed in v1.6.0.
+- **D68** — nothing said to keep `[book] pending_merge_for` while merging, and removing it relisted merged files. Fixed in v1.6.0.
+- **D69** — a default the project had removed came back unannounced, and a default code rule could not be switched off. Fixed in v1.6.0.
+- **D70** — `book config --json` with no key, given for the whole merged view, failed. Fixed in v1.6.0.
+- **D71** — `[book] declined` naming the defaults file emptied the guard's lists unseen. Fixed in v1.6.0.
+- **D72** — the guard's refusal over a broken or missing settings file did not name the file. Fixed in v1.6.0.
+- **D73** — the Book's tools split a table row's cells four different ways. Fixed in v1.6.0.
+- **D74** — `book requirements import` misfiled rows and dropped columns whose headers it did not know by exact name. Fixed in v1.6.0.
+- **D75** — the requirements import broke the audit's relative links and doubled escaped pipes. Fixed in v1.6.0.
+- **D76** — the requirements import made a dated audit pass a module without saying so. Fixed in v1.6.0.
+- **D77** — a second upgrade report claimed removed defaults were back and dropped the import reminder. Fixed in v1.6.0.
+- **D78** — the 1.6 settings split left orphaned and misleading comments in factory.toml. Fixed in v1.6.0.
+- **D79** — the upgrade report buried the decisions under routine diffs and listed DROPPED files repeatedly. Fixed in v1.6.0.
+- **D80** — a comment in the requirements import held a client-domain word. Fixed in v1.6.0.
+- **D81** — the requirements import read a row with an unescaped pipe shifted and dropped its surplus cells. Fixed in v1.6.0.
+- **D82** — the requirements import filed a row by the first status in its history, not its last. Fixed in v1.6.0.
+- **D83** — the requirements import broke the archived audit's relative links. Fixed in v1.6.0.
+- **D84** — a converted register warned once per id off the id prefix. Fixed in v1.6.0.
+- **D85** — a re-run of the 1.6 upgrade printed an empty settings move. Fixed in v1.6.0.
+- **D86** — check-book crashed on a tracked document deleted from the working tree. Fixed in v1.6.0.
+- **D87** — the upgrade's default diffs file was shared by checkouts with the same folder name. Fixed in v1.6.0.
+- **D88** — a converted requirement's Note dropped the status its audit history began with. Fixed in v1.6.0.
+- **D89** — the requirements import missed a status move written in words, and said nothing of a cell that did not say which status was current. Fixed in v1.6.0.
+- **D90** — the 1.6 upgrade repeated its "run this" CONFIRMs after the work was done. Fixed in v1.6.0.
+- **D91** — a later run of the 1.6 move wrote back a `drift_accepted` list a person had removed. Fixed in v1.6.0.
+- **D92** — the requirements import gave an ambiguous status cell a status without saying so. Fixed in v1.6.0.

@@ -8,6 +8,7 @@ throwaway repository: a correct fixture passes it, a broken one fails it. The ex
 
 from __future__ import annotations
 
+import hashlib
 import re
 import json
 import os
@@ -17,11 +18,13 @@ import sys
 import tempfile
 import tomllib
 import unittest
+import unittest.mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import book_config  # noqa: E402
 import book  # noqa: E402
 import factory  # noqa: E402
 
@@ -138,7 +141,7 @@ email-templates/
   -> designs
 """
 
-PINNED = {"book-plugins": {"source": {"source": "github", "repo": "owner/book-plugin", "ref": "v0.6.0"},
+PINNED = {"book-plugins": {"source": {"source": "github", "repo": "owner/book-plugin", "ref": "v0.7.0"},
                            "autoUpdate": False}}
 SETTINGS = {"attribution": {"commit": "", "pr": ""}, "extraKnownMarketplaces": PINNED,
             "enabledPlugins": {"book@book-plugins": True}, "hooks":{"PreToolUse": [{"matcher": MATCHER, "hooks": [
@@ -340,6 +343,26 @@ class EachCheck(BookCase):
         self.write("docs/defects.md", DEFECTS.replace("Class: api-contract · found 2026-11-16", "see PR"))
         self.assertFails(book.n10_ledgers)
 
+    def test_n10_takes_a_classified_defect_row_in_the_1_6_shape(self):
+        # The 1.6 Open table: Type and Source columns, and the Note says only when the row was found.
+        classified = ("# Defects\n\n## Open\n\n"
+                      "| Id | Sev | Status | Type | Source | Defect | Where | Note |\n"
+                      "|---|---|---|---|---|---|---|---|\n"
+                      "| D1 | High | Open | bug | code-review: PR #60 | Login fails | src/Auth | found 2026-11-23 |\n"
+                      "\n## Fixed\n")
+        self.write("docs/defects.md", classified)
+        self.assertPasses(book.n10_ledgers)
+        self.write("docs/defects.md", classified.replace("found 2026-11-23", "see PR"))
+        self.assertIn('D1: no "found <date>"', book.n10_ledgers(self.ctx())[1].detail)
+        self.write("docs/defects.md", classified.replace("| bug |", "| oops |"))
+        self.assertIn("Type 'oops'", book.n10_ledgers(self.ctx())[1].detail)
+        self.write("docs/defects.md", classified.replace("| bug | code-review: PR #60 |", "| — | — |"))
+        self.assertPasses(book.n10_ledgers)  # an unclassified row is check-book's warning, not verify's failure
+
+    def test_n10_knows_the_types_check_book_knows(self):
+        text = (HERE.parent / "checks" / "check-book.py").read_text(encoding="utf-8")
+        self.assertEqual(eval(re.search(r"^TYPES = (\(.*\))$", text, re.M).group(1)), book.DEFECT_TYPES)
+
     def test_n11_plan_status(self):
         self.assertPasses(book.n11_plan_status)
         self.write("docs/plans/things.md", PLAN.replace(" · **FSD:** §1", ""))
@@ -353,6 +376,28 @@ class EachCheck(BookCase):
     def test_the_guide_template_is_not_a_guide(self):
         self.write("docs/fe-integration-guides/_template.md",
                    "# <Module>\n\n**Last checked against the code:** YYYY-MM-DD (<commit>)\n")
+        self.assertPasses(book.n12_fe_guides)
+
+    def test_with_the_pack_the_guide_template_and_the_packs_docs_must_exist(self):
+        # Book D44: a Book installed before upgrade offered the guide template lacked it, and verify said nothing.
+        with_pack = FACTORY_TOML.replace('env_prefix = "ACME_"\n', 'env_prefix = "ACME_"\npacks = ["fe-guides"]\n')
+        self.write("devtools/factory/factory.toml", with_pack)
+        lines = book.n12_fe_guides(self.ctx())
+        self.assertEqual(lines[0].status, book.MISSING)
+        for rel in ("docs/fe-integration-guides/_template.md", "docs/ui-standard.md",
+                    "docs/fe-integration-guides/api-conventions.md", "docs/api/fe-api-coverage.md"):
+            self.assertIn(rel, lines[0].detail)
+        for rel in book.pack_docs(self.manifest, "fe-guides"):
+            self.write(rel, "# A document\n\n**Last checked against the code:** 2026-11-16 (abc1234)\n")
+        self.assertPasses(book.n12_fe_guides)
+
+    def test_a_project_can_skip_a_packs_optional_document(self):
+        with_pack = FACTORY_TOML.replace('env_prefix = "ACME_"\n', 'env_prefix = "ACME_"\npacks = ["fe-guides"]\n'
+                                         'skip_skeletons = ["docs/ui-standard.md"]\n')
+        self.write("devtools/factory/factory.toml", with_pack)
+        for rel in book.pack_docs(self.manifest, "fe-guides"):
+            if rel != "docs/ui-standard.md":
+                self.write(rel, "# A document\n\n**Last checked against the code:** 2026-11-16 (abc1234)\n")
         self.assertPasses(book.n12_fe_guides)
 
     def test_n13_requirements(self):
@@ -495,9 +540,9 @@ class EachCheck(BookCase):
             line = next(l for l in book.n16_skills(self.ctx()) if l.element == "the book plugin is pinned to a release")
             return line.status, line.render()
 
-        self.assertEqual(book.OK, pin_status()[0], "the fixture pins v0.6.0, this template's plugin_min")
+        self.assertEqual(book.OK, pin_status()[0], "the fixture pins v0.7.0, this template's plugin_min")
         source = {"source": "github", "repo": "owner/book-plugin"}
-        for ref, status in (("v9.0.0", book.OK), ("v0.3.0", book.WRONG), ("v0.4.0", book.WRONG), ("v0.5.0", book.WRONG), ("v0.5.1", book.WRONG),
+        for ref, status in (("v9.0.0", book.OK), ("v0.3.0", book.WRONG), ("v0.4.0", book.WRONG), ("v0.5.0", book.WRONG), ("v0.5.1", book.WRONG), ("v0.6.0", book.WRONG), ("v0.6.1", book.WRONG),
                             (None, book.WRONG),
                             ("main", book.WRONG),
                             ("e1e60175b0fbacdcc28342946e20b41461fe7d7a", book.CONFIRM),
@@ -903,6 +948,122 @@ class Classify(unittest.TestCase):
         self.assertEqual(book.classify(b"core\n", b"core\n", None, True), book.DROPPED)
 
 
+class InstalledSettings(unittest.TestCase):
+    def test_the_installed_releases_settings_are_rebuilt_as_its_init_wrote_them(self):
+        # Book D77: what a project removed is told from what this release's init wrote, not from the new defaults.
+        with tempfile.TemporaryDirectory() as folder:
+            tree = Path(folder)
+            (tree / book.SKELETONS_DIR).mkdir(parents=True)
+            (tree / book.PACKS_DIR / "dotnet").mkdir(parents=True)
+            (tree / book.SKELETONS_DIR / "factory.toml.tmpl").write_text(
+                '[book]\nname = "{{name}}"\nsize_warning = 1500\n\n{{review_scope}}\n', encoding="utf-8")
+            (tree / book.PACKS_DIR / "dotnet" / book.REVIEW_SCOPE).write_text('[review_scope]\nalways = ["B0"]\n',
+                                                                               encoding="utf-8")
+            (tree / book.PACKS_DIR / "dotnet" / book.APPEND).write_text(
+                '\n[[code_rules]]\nid = "no-print"\npattern = "x"\n', encoding="utf-8")
+            config = {"book": {"name": "Acme", "slug": "acme", "env_prefix": "ACME", "stack": "dotnet", "packs": []}}
+            manifest = {"skeletons": {"devtools/factory/factory.toml": "factory.toml.tmpl"}}
+            params = dict(book.target_params(config), name="Acme")
+            with unittest.mock.patch.object(book, "skeleton_map",
+                                            return_value={book.CONFIG_RELATIVE: "factory.toml.tmpl"}):
+                settings = book.installed_settings(tree, manifest, params, ["dotnet"], config)
+        self.assertEqual(settings["book"], {"name": "Acme", "size_warning": 1500})
+        self.assertEqual(settings["review_scope"]["always"], ["B0"])
+        self.assertEqual(settings["code_rules"][0]["id"], "no-print")
+
+
+class TemplateDocsSince(unittest.TestCase):
+    def test_a_guide_template_the_installed_version_did_not_own_is_new_not_removed(self):
+        # Book D44: from 1.5.1 the template owns it; a 1.5.0 Book that lacks it never deleted it.
+        guide = "docs/fe-integration-guides/_template.md"
+        files = {guide: b"# <Module>\n", "docs/plans/_template.md": b"# Plan\n"}
+        self.assertEqual(sorted(book.owned_then(files, "1.5.0")), ["docs/plans/_template.md"])
+        self.assertEqual(sorted(book.owned_then(files, "1.5.1")), sorted(files))
+        installed = book.owned_then(files, "1.5.0").get(guide)
+        self.assertEqual(book.classify(None, installed, files[guide], True), book.NEW)
+
+
+class PackSkeletonNotes(unittest.TestCase):
+    def test_a_pack_document_the_project_lacks_is_named_with_its_skeleton(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder)
+            notes = "\n".join(book.pack_skeleton_notes(target, MANIFEST, ["fe-guides"]))
+            self.assertIn("MISSING docs/ui-standard.md: the fe-guides pack's document", notes)
+            self.assertIn("skeletons/ui-standard.md.tmpl", notes)
+            (target / "docs").mkdir()
+            (target / "docs/ui-standard.md").write_text("# UI standard\n", encoding="utf-8")
+            self.assertNotIn("ui-standard", "\n".join(book.pack_skeleton_notes(target, MANIFEST, ["fe-guides"])))
+            self.assertEqual(book.pack_skeleton_notes(target, MANIFEST, []), [])
+
+    def test_a_skeleton_path_takes_the_projects_name(self):
+        manifest = {"packs": {"dotnet": {"skeletons": {"src/Widget.API/CLAUDE.md": "api-claude.md.tmpl"}}}}
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder)
+            notes = "\n".join(book.pack_skeleton_notes(target, manifest, ["dotnet"], pairs=[("Widget", "Acme")]))
+            self.assertIn("MISSING src/Acme.API/CLAUDE.md", notes)
+            self.assertNotIn("Widget", notes)
+            (target / "src/Acme.API").mkdir(parents=True)
+            (target / "src/Acme.API/CLAUDE.md").write_text("# API\n", encoding="utf-8")
+            self.assertEqual(book.pack_skeleton_notes(target, manifest, ["dotnet"], pairs=[("Widget", "Acme")]), [])
+
+    def test_a_skipped_skeleton_is_not_asked_for(self):
+        with tempfile.TemporaryDirectory() as folder:
+            notes = book.pack_skeleton_notes(Path(folder), MANIFEST, ["fe-guides"], {"docs/ui-standard.md"})
+            self.assertNotIn("ui-standard", "\n".join(notes))
+
+
+class RequirementsReadMeOffers(unittest.TestCase):
+    """Book D47: a read-me written before v1.3 kept `/requirements-check`, and upgrade never compared it."""
+
+    PARAMS = {"name": "Acme", "title": "Acme Shop", "slug": "acme", "env_prefix": "ACME_"}
+
+    def old_copy(self, skeleton: str) -> str:
+        text = (HERE / "book-template/skeletons" / skeleton).read_text(encoding="utf-8")
+        text = text.replace("{{title}}", "Acme Shop").replace("{{fsd_label}}", "FSD").replace("{{fsd_link}}", "<link>")
+        return text.replace("book:check-sources", "requirements-check")
+
+    def offers(self, files: dict[str, str]):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder)
+            for rel, text in files.items():
+                (target / rel).parent.mkdir(parents=True, exist_ok=True)
+                (target / rel).write_text(text, encoding="utf-8", newline="\n")
+            return book.requirements_read_me_offers(target, MANIFEST, HERE.parents[1], self.PARAMS, [])
+
+    def test_an_otherwise_unchanged_copy_is_offered_with_only_its_names_changed(self):
+        index = self.old_copy("requirements-index.txt.tmpl").replace(
+            "Permissions matrix: <link>", "Permissions matrix: https://example.invalid/matrix")
+        linked = self.old_copy("requirements-linked.txt.tmpl").replace(
+            "Last checked: never", "Last checked: 2026-11-16 - captured V3\n  (the comments too)")
+        self.assertIn("`/requirements-check all`", index)
+        offers, notes = self.offers({"requirements/read-me.txt": index, "requirements/fsd/read-me.txt": linked})
+        self.assertEqual(notes, [])
+        self.assertEqual(sorted(offers), ["requirements/fsd/read-me.txt", "requirements/read-me.txt"])
+        new_index = offers["requirements/read-me.txt"][1].decode("utf-8")
+        self.assertIn("`/book:check-sources all`", new_index)
+        self.assertIn("the book:check-sources skill", new_index)
+        self.assertIn("https://example.invalid/matrix", new_index, "the project's LINKS stay")
+        self.assertEqual(new_index, index.replace("requirements-check", "book:check-sources"))
+        self.assertIn("Last checked: 2026-11-16 - captured V3", offers["requirements/fsd/read-me.txt"][1].decode())
+
+    def test_a_copy_with_the_projects_own_text_is_named_for_a_person(self):
+        index = self.old_copy("requirements-index.txt.tmpl").replace(
+            "Format per entry", "Our own paragraph.\n\nFormat per entry")
+        qa = "Versioning: the superseded copy moves into backup/. See requirements-check skill, Phase 4.\n"
+        offers, notes = self.offers({"requirements/read-me.txt": index, "requirements/qa-artifacts/read-me.txt": qa})
+        self.assertEqual(offers, {})
+        self.assertIn("2 requirements read-me file(s)", notes[0])
+        self.assertIn("requirements/qa-artifacts/read-me.txt (line 1)", notes[0])
+        self.assertIn("requirements/read-me.txt (lines 4, 7)", notes[0])
+
+    def test_current_names_and_a_branch_name_are_left_alone(self):
+        self.assertEqual(book.new_skill_names("on a `chore/book-setup-<slug>` branch"),
+                         "on a `chore/book-setup-<slug>` branch")
+        self.assertEqual(book.new_skill_names("run /review-branch, then review-pr"), "run /book:self-review, then book:peer-review")
+        offers, notes = self.offers({"requirements/read-me.txt": "Run /book:check-sources all.\n"})
+        self.assertEqual((offers, notes), ({}, []))
+
+
 class PluginNotes(unittest.TestCase):
     """A v1.2.9 Book upgrading onto the book plugin is told each step upgrade cannot take for it."""
 
@@ -1269,9 +1430,19 @@ class Upgrade(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8", newline="\n")
 
-    def release(self, version: str, files: dict[str, str], remove: tuple[str, ...] | list[str] = ()) -> None:
-        """Commit the template at `version` and tag it v<version>, as the boilerplate tags each release."""
-        files = dict(files, **{"devtools/factory/book-template/manifest.toml": UPGRADE_MANIFEST.format(version=version)})
+    def release(self, version: str, files: dict[str, str], remove: tuple[str, ...] | list[str] = (),
+                plugin_min: str = "", copy: tuple[str, ...] = ()) -> None:
+        """Commit the template at `version` and tag it v<version>, as the boilerplate tags each release. With
+        `plugin_min`, the template names the book plugin and owns .claude/settings.json, which pins it."""
+        manifest = UPGRADE_MANIFEST.format(version=version)
+        if copy:
+            manifest = manifest.replace('"devtools/checks/*.py"', ", ".join(['"devtools/checks/*.py"',
+                                                                             *(f'"{rel}"' for rel in copy)]), 1)
+        if plugin_min:
+            manifest = manifest.replace("\n\n[source]", f'\nplugin = "book@book-plugins"\nplugin_min = "{plugin_min}"'
+                                                        "\n\n[source]", 1).replace(
+                '".claude/skills/**/*"', '".claude/settings.json", ".claude/skills/**/*"', 1)
+        files = dict(files, **{"devtools/factory/book-template/manifest.toml": manifest})
         for rel, content in files.items():
             self.write(self.template, rel, content)
         for rel in remove:
@@ -1284,9 +1455,14 @@ class Upgrade(unittest.TestCase):
         return book.load_manifest(self.template / "devtools/factory/book-template")
 
     def upgrade(self, apply: bool = False) -> str:
+        """The report, and after it the BEHIND and NEW diffs it wrote to their own file (Book D79)."""
+        diffs = self.target.parent / "upgrade.diff"
+        if diffs.exists():
+            diffs.unlink()
         text, ok = book.upgrade(self.target, book.load_target_config(self.target), self.manifest(), self.template,
-                                apply, book.real_runner)
+                                apply, book.real_runner, diffs)
         self.assertTrue(ok)
+        self.routine = diffs.read_text(encoding="utf-8") if diffs.exists() else ""
         return text
 
     def snapshot(self) -> dict[str, bytes]:
@@ -1314,15 +1490,49 @@ class Upgrade(unittest.TestCase):
                      "BEHIND    devtools/factory/book-template/manifest.toml", "NEW       devtools/checks/new.py",
                      "CONFLICT  .claude/skills/s/SKILL.md", "DROPPED   devtools/checks/old.py"]:
             self.assertIn(line, report.splitlines())
-        # A diff for each file it would write, with the project's names in the template's text.
-        self.assertIn("--- a/devtools/checks/tool.py (project)\n+++ b/devtools/checks/tool.py (template 1.1.0)", report)
-        self.assertIn("-print('Acme tool, v1')\n+print('Acme tool, v2')", report)
-        self.assertIn("--- /dev/null\n+++ b/devtools/checks/new.py (template 1.1.0)", report)
+        # A diff for each file it would write, with the project's names in the template's text: in their own
+        # file, which the report names, since --apply takes them without a decision (Book D79).
+        self.assertIn("--- a/devtools/checks/tool.py (project)\n+++ b/devtools/checks/tool.py (template 1.1.0)",
+                      self.routine)
+        self.assertIn("-print('Acme tool, v1')\n+print('Acme tool, v2')", self.routine)
+        self.assertIn("--- /dev/null\n+++ b/devtools/checks/new.py (template 1.1.0)", self.routine)
+        self.assertNotIn("+++ b/devtools/checks/tool.py", report)
+        self.assertIn("The BEHIND and NEW diffs (5 file(s), which --apply takes without a decision): ", report)
+        self.assertEqual(sum(line.endswith(" devtools/checks/old.py") for line in report.splitlines()), 1,
+                         "a file for a person is listed once")
         # The conflict shows what the template changed, for a person to carry over.
         self.assertIn("-# Acme skill, v1\n+# Acme skill, v2", report)
         # The project's own content is never compared, even where a template pattern reaches it.
         for rel in ("docs/project.md", "requirements/read-me.txt", "devtools/factory/factory.toml"):
             self.assertNotIn(rel, report)
+
+    def test_the_default_diffs_file_is_one_per_checkout_and_the_header_names_it(self):
+        # Book D87: two checkouts with the same folder name once wrote the same file in the temporary folder.
+        text, ok = book.upgrade(self.target, book.load_target_config(self.target), self.manifest(), self.template,
+                                False, book.real_runner, None)
+        self.assertTrue(ok)
+        head = text.splitlines()[0]
+        self.assertIn("report only, nothing written in the project", head)
+        where = Path(head.split("; the BEHIND and NEW diffs are written to ", 1)[1])
+        self.addCleanup(where.unlink, missing_ok=True)
+        self.assertTrue(where.is_file())
+        unique = hashlib.sha256(str(self.target.resolve()).encode("utf-8")).hexdigest()[:8]
+        self.assertEqual(where.name, f"book-upgrade-{self.target.name}-{unique}-1.1.0.diff")
+
+    def test_an_unchanged_template_copy_file_the_template_dropped_is_removed_by_apply(self):
+        # Book D79: nothing reads the project's copy of the template, so an unchanged dropped file is no decision.
+        rel = "devtools/factory/book-template/skeletons/project.md.tmpl"
+        self.release("1.2.0", {}, remove=[rel])
+        report = self.upgrade()
+        self.assertIn(f"RETIRED   {rel}", report.splitlines())
+        self.assertNotIn(rel, report.split("For a person", 1)[1] if "For a person" in report else "")
+        self.assertIn("--apply removes them (RETIRED below)", report)
+        applied = self.upgrade(apply=True)
+        self.assertIn("removed (staged)", applied)
+        self.assertFalse((self.target / rel).exists())
+        staged = subprocess.run(["git", "diff", "--cached", "--name-status"], cwd=self.target, capture_output=True,
+                                text=True).stdout
+        self.assertIn(f"D\t{rel}", staged)
 
     def test_apply_updates_only_what_the_project_did_not_change_and_bumps_the_version(self):
         config_before = self.read("devtools/factory/factory.toml")
@@ -1340,28 +1550,64 @@ class Upgrade(unittest.TestCase):
         # The project's content is untouched.
         self.assertEqual(self.read("docs/project.md"), "# Acme Shop, our project\n")
         self.assertEqual(self.read("requirements/read-me.txt"), "The Acme index, v1\n")
-        # The version bump, and nothing else in factory.toml.
-        self.assertEqual(self.read("devtools/factory/factory.toml"),
-                         config_before.replace('book_version = "1.0.0"', 'book_version = "1.1.0"'))
-        self.assertIn("book_version 1.0.0 -> 1.1.0", report)
+        # A conflict is left to merge, so the version stays and the file is listed (Book D56); nothing else changes.
+        self.assertEqual(self.read("devtools/factory/factory.toml"), config_before.replace(
+            "[book]\n", '[book]\npending_merge = [".claude/skills/s/SKILL.md"]\npending_merge_for = "1.1.0"\n', 1))
+        self.assertIn("book_version stays 1.0.0: 1 file(s) to merge by hand are listed in [book] pending_merge", report)
+        # Taking pending_merge_for out with the list relists every file (Book D68): the message says to keep it.
+        self.assertIn("leave [book] pending_merge_for as it is", report)
         staged = subprocess.run(["git", "diff", "--cached", "--name-only"], cwd=self.target, capture_output=True,
                                 text=True).stdout.split()
-        self.assertEqual(staged, ["devtools/checks/new.py"], "only the new file is staged; the rest is left to review")
+        self.assertEqual(staged, ["devtools/checks/new.py", "devtools/factory/book-files.lock"],
+                         "only the new file and the lock are staged; the rest is left to review")
+        # Run again: the conflict is still one, with the template's change to carry over, and the list is named.
+        again = self.upgrade()
+        self.assertIn("installed 1.0.0, template 1.1.0", again.splitlines()[0])
+        self.assertIn("CURRENT   devtools/checks/tool.py", again.splitlines())
+        self.assertIn("CONFLICT  .claude/skills/s/SKILL.md", again.splitlines())
+        self.assertIn("-# Acme skill, v1\n+# Acme skill, v2", again)
+        self.assertIn("1 file(s) an earlier --apply left to merge by hand ([book] pending_merge): "
+                      ".claude/skills/s/SKILL.md - book_version stays 1.0.0", again)
+        self.assertIn("keep [book] pending_merge_for", again)
+        # A person merges it and takes it off the list: the next --apply bumps the version and drops the list.
+        self.write(self.target, ".claude/skills/s/SKILL.md", "# Acme skill, v2, with our own step\n")
+        config = self.target / "devtools/factory/factory.toml"
+        config.write_text(self.read("devtools/factory/factory.toml").replace(
+            'pending_merge = [".claude/skills/s/SKILL.md"]', "pending_merge = []"), encoding="utf-8", newline="\n")
+        self.assertIn("RESOLVED  .claude/skills/s/SKILL.md", self.upgrade().splitlines())
+        self.assertIn("book_version 1.0.0 -> 1.1.0", self.upgrade(apply=True))
+        self.assertEqual(self.read("devtools/factory/factory.toml"),
+                         config_before.replace('book_version = "1.0.0"', 'book_version = "1.1.0"'))
         # Run again: the installed version is now 1.1.0, so the project's edit is its own change.
-        again = self.upgrade().splitlines()
-        self.assertIn("installed 1.1.0, template 1.1.0", again[0])
-        self.assertIn("CURRENT   devtools/checks/tool.py", again)
-        self.assertIn("CHANGED   .claude/skills/s/SKILL.md", again)
+        last = self.upgrade().splitlines()
+        self.assertIn("installed 1.1.0, template 1.1.0", last[0])
+        self.assertIn("CHANGED   .claude/skills/s/SKILL.md", last)
 
     def test_a_book_from_before_init_stamped_it_reads_the_copied_manifest_and_apply_adds_the_stamp(self):
         config = self.target / "devtools/factory/factory.toml"
         config.write_text(self.read("devtools/factory/factory.toml").replace('book_version = "1.0.0"\n', ""),
                           encoding="utf-8", newline="\n")
         self.assertIn("installed 1.0.0", self.upgrade().splitlines()[0])
+        # With a conflict left, apply writes the installed version, as the copied manifest it came from moves on.
         self.upgrade(apply=True)
         import tomllib
+        self.assertEqual(tomllib.loads(self.read("devtools/factory/factory.toml"))["book_version"], "1.0.0")
+        self.write(self.target, ".claude/skills/s/SKILL.md", "# Acme skill, v2\n")
+        self.upgrade(apply=True)
         self.assertEqual(tomllib.loads(self.read("devtools/factory/factory.toml"))["book_version"], "1.1.0")
         self.assertTrue(self.read("devtools/factory/factory.toml").startswith("# The Book's configuration.\n# The Book"))
+
+    def test_the_installed_version_is_read_from_its_tag_never_a_branch_of_the_same_name(self):
+        # A branch named like the release, moved on since the tag: git resolves a bare v1.0.0 to it (Book D58).
+        git(self.template, "checkout", "-q", "-b", "v1.0.0", "v1.0.0")
+        self.write(self.template, "devtools/checks/tool.py", "print('Widget tool, a moved branch')\n")
+        git(self.template, "commit", "-q", "-am", "Move the branch")
+        git(self.template, "checkout", "-q", "-")
+        report = self.upgrade()
+        self.assertIn("BEHIND    devtools/checks/tool.py", report.splitlines(), "compared with the tag, not the branch")
+        self.assertNotIn("a moved branch", report)
+        git(self.template, "tag", "-d", "v1.0.0")
+        self.assertIn("the template repository has no tag v1.0.0", self.upgrade(), "the branch alone is no release")
 
     def test_without_the_installed_versions_tag_nothing_that_differs_is_written(self):
         git(self.template, "tag", "-d", "v1.0.0")
@@ -1397,6 +1643,34 @@ class Upgrade(unittest.TestCase):
         report = self.upgrade(apply=True)
         self.assertIn("REMOVED   devtools/checks/tool.py", report.splitlines())
         self.assertFalse((self.target / "devtools/checks/tool.py").exists())
+        import tomllib
+        recorded = tomllib.loads(self.read("devtools/factory/factory.toml"))
+        self.assertEqual(recorded["book_version"], "1.0.0", "a REMOVED file is left to a person, as a CONFLICT is")
+        self.assertEqual(recorded["book"]["pending_merge"], [".claude/skills/s/SKILL.md", "devtools/checks/tool.py"])
+        self.assertIn("REMOVED   devtools/checks/tool.py", self.upgrade().splitlines(), "still named on the next run")
+
+    def test_the_plugin_pin_note_is_worked_out_after_apply_writes_the_settings(self):
+        settings = ('{"enabledPlugins": {"book@book-plugins": true}, "extraKnownMarketplaces": {"book-plugins": '
+                    '{"source": {"source": "github", "repo": "o/p", "ref": "v%s"}}}}\n')
+        self.write(self.target, ".claude/skills/s/SKILL.md", "# Acme skill, v2\n")  # no conflict left
+        self.release("1.1.1", {".claude/settings.json": settings % "0.1.0"}, plugin_min="0.1.0")
+        self.upgrade(apply=True)
+        self.assertIn('"ref": "v0.1.0"', self.read(".claude/settings.json"))
+        self.release("1.2.0", {".claude/settings.json": settings % "0.2.0"}, plugin_min="0.2.0")
+        stale = "pins the book plugin at v0.1.0, older than template 1.2.0's plugin_min 0.2.0"
+        self.assertIn(stale, self.upgrade(), "the report names the old pin")
+        applied = self.upgrade(apply=True)
+        self.assertIn("BEHIND    .claude/settings.json", applied.splitlines())
+        self.assertIn('"ref": "v0.2.0"', self.read(".claude/settings.json"))
+        self.assertNotIn(stale, applied, "the same run moved the pin (Book D57)")
+
+    def test_verify_names_the_files_left_to_merge(self):
+        self.upgrade(apply=True)
+        ctx = book.Context(self.target, book.load_target_config(self.target), self.manifest(), book.real_runner)
+        lines = [line for line in book.n15_factory_config(ctx) if "pending_merge" in line.detail]
+        self.assertEqual([line.status for line in lines], [book.TO_FILL])
+        self.assertIn("1 template file(s) the upgrade to 1.1.0 left to merge by hand (.claude/skills/s/SKILL.md)",
+                      lines[0].detail)
 
     def test_a_declined_file_is_never_written_and_is_nothing_for_a_person(self):
         # A project whose own script does a pack file's job declines it: not REMOVED, not created.
@@ -1420,9 +1694,41 @@ class Upgrade(unittest.TestCase):
                           encoding="utf-8", newline="\n")
         self.assertIn("[book] has no stack or packs: no pack file is compared", self.upgrade())
 
+    def test_going_to_1_6_a_nested_claude_md_the_book_owned_is_split_never_dropped(self):
+        # A dotnet Book's src/CLAUDE.md was the Book's at 1.5 and is the project's own (a skeleton) from 1.6:
+        # deleting it, as DROPPED advises, would lose the project's rule and the import of the stack's rules.
+        self.release("1.5.0", {"src/CLAUDE.md": "# Source\n\n- **Code goes in a layer.**\n"}, copy=("src/CLAUDE.md",))
+        config = self.target / "devtools/factory/factory.toml"
+        config.write_text(self.read("devtools/factory/factory.toml").replace('"1.0.0"', '"1.5.0"')
+                          .replace('stack = "none"', 'stack = "dotnet"'), encoding="utf-8")
+        self.write(self.target, "src/CLAUDE.md", "# Source\n\n- **Code goes in a layer.**\n- Our rule: `*Job`.\n")
+        self.release("1.6.0", {".claude/book/rules.md": "# Rules\n",
+                               ".claude/book/dotnet/src.md": "- **Code goes in a layer.**\n"},
+                     copy=(".claude/book/**/*",))
+        report = self.upgrade()
+        self.assertIn("SPLIT     src/CLAUDE.md", report)
+        self.assertNotIn("DROPPED   src/CLAUDE.md", report)
+        self.assertIn("SPLIT    src/CLAUDE.md: 1 block(s) are the Book's", report)
+        # What the move takes out of each file is shown in the report, before and after (Book D79).
+        decide = report.split("Diffs to decide on", 1)[1]
+        self.assertIn("# src/CLAUDE.md: the 1.6 move (SPLIT)", decide)
+        self.assertIn("+@../.claude/book/dotnet/src.md", decide)
+        self.assertIn("# devtools/factory/factory.toml: the 1.6 move (SPLIT)", decide)
+        self.upgrade(apply=True)
+        text = self.read("src/CLAUDE.md")
+        self.assertIn("@../.claude/book/dotnet/src.md", text)
+        self.assertIn("Our rule: `*Job`.", text)
+        # Book D85: a re-run while a file waits to be merged has no move left to show.
+        again = self.upgrade()
+        self.assertIn("book_version stays 1.5.0", again)
+        self.assertNotIn("SPLIT    devtools/factory/factory.toml", again)
+        self.assertNotIn("the 1.6 move (SPLIT)", again)
+
     def test_refuses_to_go_back_or_to_upgrade_the_template_itself(self):
         config = self.target / "devtools/factory/factory.toml"
         config.write_text(self.read("devtools/factory/factory.toml").replace('"1.0.0"', '"9.0.0"'), encoding="utf-8")
+        # A Book at 1.6 or later reads its core defaults file: without one its settings are refused first.
+        self.write(self.target, "devtools/factory/book-defaults.toml", "")
         with self.assertRaises(book.BookError) as raised:
             self.upgrade()
         self.assertIn("never goes back", str(raised.exception))
@@ -1532,9 +1838,15 @@ class TheRealTemplate(unittest.TestCase):
                                  "fe-guides" in packs)
                 self.assertFalse((target / ".claude/skills").exists(), "from v1.5 the template owns no skill, nor stub")
                 config = (target / "devtools/factory/factory.toml").read_text(encoding="utf-8")
-                self.assertIn('id = "data-script-ddl"', config, "every stack keeps the core rule")
-                self.assertEqual('id = "anonymous-route"' in config, stack == "dotnet")
-                self.assertEqual("[dotnet_checks]" in config, stack == "dotnet")
+                merged = book_config.load(target)
+                rule_ids = [rule["id"] for rule in merged.get("code_rules", [])]
+                self.assertIn("data-script-ddl", rule_ids, "every stack keeps the core rule")
+                self.assertEqual("anonymous-route" in rule_ids, stack == "dotnet")
+                self.assertEqual("dotnet_checks" in merged, stack == "dotnet")
+                # The project's file keeps its own settings; the shared ones are the defaults it was given.
+                self.assertNotRegex(config, r"(?m)^\[\[code_rules\]\]")
+                self.assertTrue((target / "devtools/factory/book-defaults.toml").is_file())
+                self.assertEqual((target / "devtools/factory/book-defaults/dotnet.toml").is_file(), stack == "dotnet")
                 # The deploy pack's table names the project's own variables, and leaves only `<…>` to fill.
                 self.assertEqual('test_db_variable = "ACME_TEST_DB"' in config, "deploy" in packs)
                 self.assertNotIn("{{", config)
@@ -1542,8 +1854,20 @@ class TheRealTemplate(unittest.TestCase):
                 self.assertEqual(book.installed_packs(tomllib.loads(config)),
                                  ([stack] if stack != "none" else []) + packs)
                 claude = (target / "CLAUDE.md").read_text(encoding="utf-8")
-                self.assertEqual("check-fe-guides.py" in claude, "fe-guides" in packs, "a pack's rule comes with it")
+                # The Book's rules are imported, not copied: the project's CLAUDE.md holds its own only.
+                self.assertIn("\n@.claude/book/rules.md\n", claude)
+                self.assertNotIn("Never commit a real secret", claude)
+                self.assertEqual("@.claude/book/fe-guides.md" in claude, "fe-guides" in packs, "a pack's rule comes with it")
+                read = book_config.expanded(target, "CLAUDE.md")
+                self.assertIn("Never commit a real secret", read)
+                self.assertEqual("check-fe-guides.py" in read, "fe-guides" in packs)
                 self.assertNotIn("{{", claude)
+                for nested in ("docs/CLAUDE.md", "tests/CLAUDE.md") + (
+                        ("src/CLAUDE.md", "src/Acme.API/CLAUDE.md", "src/Acme.Persistence/CLAUDE.md")
+                        if stack == "dotnet" else ()):
+                    self.assertEqual(book_config.missing_imports(target, nested), [], nested)
+                    self.assertGreater(len(book_config.expanded(target, nested)),
+                                       2 * len((target / nested).read_text(encoding="utf-8")), nested)
                 # Every marker names a check the install ships (decision Q): a new Book's rules hold on day one,
                 # as init left them - every file staged, the hooks executable, the table written.
                 rules = subprocess.run([sys.executable, "devtools/checks/check-rules.py", "--check"], cwd=target,
@@ -1561,15 +1885,21 @@ class TheRealTemplate(unittest.TestCase):
                 linked = subprocess.run([sys.executable, "devtools/checks/check-book.py"], cwd=target,
                                         capture_output=True, text=True)
                 self.assertEqual(linked.returncode, 0, linked.stdout + linked.stderr)
-                self.assertReviewChecklistIsWhole(target, config)
+                self.assertReviewChecklistIsWhole(target, merged)
                 # What upgrade compares (owned_files) is what init wrote, at the same path: CURRENT, never REMOVED.
                 # A verbatim template file keeps its path too (packs/dotnet/src/Boilerplate.API/ is not renamed).
                 owned = book.owned_files(root, MANIFEST, dict(PARAMS), book.installed_packs({"book": dict(PARAMS, stack=stack, packs=packs)}))
                 drifted = [rel for rel, data in owned.items()
                            if not (target / rel).is_file() or (target / rel).read_bytes() != data]
                 self.assertEqual(drifted, [])
+                self.assertIn(".claude/book/rules.md", owned, "the Book's rules are the Book's, replaced on upgrade")
+                self.assertNotIn("CLAUDE.md", owned)
                 if stack == "dotnet":
-                    self.assertIn("devtools/factory/book-template/packs/dotnet/src/Boilerplate.API/CLAUDE.md", owned)
+                    self.assertIn(".claude/book/dotnet/api.md", owned)
+                    self.assertNotIn("src/Acme.API/CLAUDE.md", owned, "a nested CLAUDE.md is the project's own")
+                # The guide template is the template's, as the plan template is: upgrade offers it (Book D44).
+                self.assertEqual("docs/fe-integration-guides/_template.md" in owned, "fe-guides" in packs)
+                self.assertNotIn("docs/ui-standard.md", owned, "a skeleton's target is the project's own")
                 for path in target.rglob("*"):
                     if path.is_file() and ".git" not in path.parts and "book-template" not in path.parts \
                             and path.name not in ("book.py", "test_book.py") and path.suffix in (".md", ".py", ".sh", ".mdc", ".yml"):
@@ -1580,10 +1910,9 @@ class TheRealTemplate(unittest.TestCase):
                         # Nor inside an identifier (a database name): a slug may hold a hyphen.
                         self.assertNotRegex(text, r"(?<![\w-])acme_\w", str(path))
 
-    def assertReviewChecklistIsWhole(self, target: Path, config: str) -> None:
+    def assertReviewChecklistIsWhole(self, target: Path, config: dict) -> None:
         """One file per review dimension [review_scope] names, each check in exactly one of them."""
-        import tomllib
-        scope = tomllib.loads(config)["review_scope"]
+        scope = config["review_scope"]
         folder = target / scope["folder"]
         # A `book:` file is the plugin's; only the project's own checklist files are on disk.
         names = [n for n in scope["always"] + list(scope["dimensions"].values()) if not n.startswith("book:")]

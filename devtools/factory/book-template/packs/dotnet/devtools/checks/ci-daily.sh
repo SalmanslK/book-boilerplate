@@ -63,6 +63,14 @@ fi
 clone="${1:?Usage: sh devtools/checks/ci-daily.sh <clone> <results>}"
 results_root="${2:?Usage: sh devtools/checks/ci-daily.sh <clone> <results>}"
 tools="$(cd "$(dirname "$0")" && pwd)"
+# The throwaway database's name: `[ci_daily] test_database` in the settings (the dotnet defaults: app_tests).
+test_db="$(cd "$tools/../.." && { python3 devtools/book.py config ci_daily.test_database 2>/dev/null     || python devtools/book.py config ci_daily.test_database 2>/dev/null; })" || test_db=""
+test_db="${test_db:-app_tests}"
+case "$test_db" in
+    *[!a-z0-9_]* | "") echo "ci-daily: [ci_daily] test_database '$test_db' is not a lower-case name" >&2; exit 2 ;;
+    *test*) ;;
+    *) echo "ci-daily: [ci_daily] test_database '$test_db' does not say it is a test database" >&2; exit 2 ;;
+esac
 mkdir -p "$results_root"
 results_root="$(cd "$results_root" && pwd)"
 day="$(date -u +%Y-%m-%d)"
@@ -109,10 +117,10 @@ finish() { # finish PASS|FAIL [step] — writes latest; the caller sets the exit
     echo "$ref at $sha; checks from $tools"
 
     docker network create "$name" >/dev/null || { finish FAIL "docker network create"; exit 1; }
-    docker run -d --name "$name-pg" --network "$name" --tmpfs /var/lib/postgresql         -e POSTGRES_DB=app_tests -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres         "$postgres_image" -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c max_connections=300         >/dev/null || { finish FAIL "start PostgreSQL"; exit 1; }
+    docker run -d --name "$name-pg" --network "$name" --tmpfs /var/lib/postgresql         -e POSTGRES_DB=$test_db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres         "$postgres_image" -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c max_connections=300         >/dev/null || { finish FAIL "start PostgreSQL"; exit 1; }
     ready=""
     for attempt in $(seq 1 30); do
-        if docker exec "$name-pg" pg_isready -U postgres -d app_tests >/dev/null 2>&1; then ready=yes; break; fi
+        if docker exec "$name-pg" pg_isready -U postgres -d $test_db >/dev/null 2>&1; then ready=yes; break; fi
         sleep 2
     done
     [ -n "$ready" ] || { finish FAIL "PostgreSQL not ready"; exit 1; }
@@ -124,7 +132,7 @@ finish() { # finish PASS|FAIL [step] — writes latest; the caller sets the exit
     # reaches the trap, and the EXIT trap removes both containers before flock lets the next run in.
     status=0
     sdk_started=yes
-    docker run --rm --name "$name-sdk" --network "$name" -w /src         -v "$(host_path "$clone")":/src -v "$(host_path "$results")":/results -v "$(host_path "$tools")":/tools:ro         -v boilerplate-ci-daily-nuget:/root/.nuget/packages         -e BOILERPLATE_TEST_DB="Host=$name-pg;Port=5432;Database=app_tests;Username=postgres;Password=postgres"         -e BOILERPLATE_CI_DAILY_FILTER="${BOILERPLATE_CI_DAILY_FILTER:-}"         "$sdk_image" sh /tools/ci-daily.sh --inside &
+    docker run --rm --name "$name-sdk" --network "$name" -w /src         -v "$(host_path "$clone")":/src -v "$(host_path "$results")":/results -v "$(host_path "$tools")":/tools:ro         -v boilerplate-ci-daily-nuget:/root/.nuget/packages         -e BOILERPLATE_TEST_DB="Host=$name-pg;Port=5432;Database=$test_db;Username=postgres;Password=postgres"         -e BOILERPLATE_CI_DAILY_FILTER="${BOILERPLATE_CI_DAILY_FILTER:-}"         "$sdk_image" sh /tools/ci-daily.sh --inside &
     wait $! || status=$?
     if [ "$status" -eq 0 ]; then
         finish PASS

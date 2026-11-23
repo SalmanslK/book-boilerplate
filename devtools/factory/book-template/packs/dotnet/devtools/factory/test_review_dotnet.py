@@ -1,6 +1,6 @@
 """
 The dotnet pack's review checklist: its dimension files (review-b1…b11 in `.claude/review/`) hold checks
-16–160 once each, each file its range, and `book review-scope` reads the triage table. The method and
+16–161 once each, each file its range (161 in B2, as in the plugin's B0), and `book review-scope` reads the triage table. The method and
 Pass A (checks 1–15, the triage table, the one READY rule) are the book plugin's, tested there.
 """
 from __future__ import annotations
@@ -68,7 +68,7 @@ class ReviewScopeTests(unittest.TestCase):
     """
     The one-file checklist's safeguards, each with its test:
 
-    C1  every check 1–160 is still there, once ................ ChecklistSplitTests
+    C1  every check 1–161 is still there, once ................ ChecklistSplitTests
     C2  the method and Pass A load on every review ............ test_the_method_and_pass_a_always_load
     C3  a path the triage cannot place loads all of Pass B .... test_an_unknown_path_loads_everything
     C4  a path matching several rows presses every row's
@@ -171,7 +171,7 @@ class ReviewScopeTests(unittest.TestCase):
 
 
 class ChecklistSplitTests(unittest.TestCase):
-    """C1: every numbered check 16–160 appears exactly once across the pack's dimension files, and each
+    """C1: every numbered check 16–161 appears exactly once across the pack's dimension files, and each
     holds exactly the range its heading names. Pass A's 1–15 are the plugin's."""
 
     ROW = re.compile(r"^\| (\d+) \|", re.M)
@@ -183,18 +183,21 @@ class ChecklistSplitTests(unittest.TestCase):
         rows = [int(n) for text in self.files().values() for n in self.ROW.findall(text)]
         duplicated = sorted({n for n in rows if rows.count(n) > 1})
         self.assertEqual(duplicated, [], "a check in two places")
-        self.assertEqual(sorted(set(rows)), list(range(16, 161)))
+        self.assertEqual(sorted(set(rows)), list(range(16, 162)))
 
     def test_each_dimension_file_holds_its_named_range(self):
         checked = 0
         for name, text in self.files().items():
-            match = re.match(r"# B\d+ · .* — checks (\d+)–(\d+)\n", text)
+            match = re.match(r"# B\d+ · .* — checks (\d+)–(\d+)((?:, \d+)*)\n", text)
             if not match:
                 continue
             checked += 1
             with self.subTest(name):
                 low, high = int(match.group(1)), int(match.group(2))
-                self.assertEqual([int(n) for n in self.ROW.findall(text)], list(range(low, high + 1)))
+                # A check added after the numbering was laid out (161, Code the requirement did not ask for)
+                # follows its dimension's range, as the plugin's B0 lists it.
+                extra = [int(n) for n in re.findall(r"\d+", match.group(3))]
+                self.assertEqual([int(n) for n in self.ROW.findall(text)], list(range(low, high + 1)) + extra)
         self.assertEqual(checked, 11)
 
     def test_no_dimension_file_restates_the_ready_rule(self):

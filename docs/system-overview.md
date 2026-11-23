@@ -16,7 +16,7 @@ deploy, a pipeline — comes from an optional **pack** that `book init` copies i
 | Word | Meaning |
 |---|---|
 | **Book** | `docs/`, the `CLAUDE.md` files and `requirements/`: the project's written truth |
-| **Owner document** | The one file that owns a topic ([Where knowledge lives](../CLAUDE.md#where-knowledge-lives)); every other file links to it |
+| **Owner document** | The one file that owns a topic ([Where knowledge lives](../.claude/book/rules.md#where-knowledge-lives)); every other file links to it |
 | **Specification (FSD)** | The client's requirements, filed read-only under `requirements/fsd/` as `- V<n>` revisions |
 | **Plan** | One feature's design and its tasks, in `docs/plans/`, written before its code |
 | **Check** | A script in `devtools/checks/` that a git hook or the local CI runs and that fails on a broken rule |
@@ -49,7 +49,8 @@ deploy, a pipeline — comes from an optional **pack** that `book init` copies i
    `sh devtools/checks/ci-local.sh` before a pull request.
 4. **Upgrade:** a Book records the `book_version` it came from; `book upgrade --target <repo>`,
    run from a newer boilerplate, reports the drift of every template-owned file with diffs, and with
-   `--apply` updates only the files the project never changed, then bumps `book_version`.
+   `--apply` updates only the files the project never changed, then bumps `book_version` - once no file
+   changed by both is left to merge (`[book] pending_merge` lists them until then).
 
 ## Systems it talks to
 

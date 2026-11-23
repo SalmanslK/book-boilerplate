@@ -50,6 +50,12 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+# The settings: factory.toml merged over the Book's defaults (devtools/factory/book_config.py).
+_FACTORY = next((p / "devtools" / "factory" for p in Path(__file__).resolve().parents
+                 if (p / "devtools" / "factory" / "book_config.py").is_file()), None)
+if _FACTORY is not None:
+    sys.path.insert(0, str(_FACTORY))
+import book_config  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -179,8 +185,7 @@ RENDERS = ("laptop", "DEV", "QA")
 def expected(root: Path = ROOT) -> dict[str, dict[str, list[str]]]:
     """`[deploy.compose]` from factory.toml: what each render must publish (the module docstring)."""
     try:
-        with open(root / "devtools" / "factory" / "factory.toml", "rb") as handle:
-            table = ((tomllib.load(handle).get("deploy") or {}).get("compose") or {})
+        table = ((book_config.load(root).get("deploy") or {}).get("compose") or {})
     except (OSError, ValueError) as error:
         raise RuntimeError(f"devtools/factory/factory.toml is unreadable ({error})") from None
     if not any(table.get(name) for name in RENDERS):
@@ -210,8 +215,21 @@ def problems(renders: dict[str, dict], want: dict[str, dict[str, list[str]]]) ->
     return found
 
 
+def project_placeholders(root: Path) -> dict[str, str]:
+    """`[deploy] compose_placeholders`: the placeholders for the variables the project's own Compose files add."""
+    table = (book_config.load(root).get("deploy") or {}).get("compose_placeholders") or {}
+    if not isinstance(table, dict) or not all(isinstance(v, str) for v in table.values()):
+        raise ValueError("[deploy] compose_placeholders is not a table of names and text values")
+    return table
+
+
 def main(root: Path = ROOT) -> int:
-    qa_env = {**os.environ, **QA_PLACEHOLDERS}
+    try:
+        extra = project_placeholders(root)
+    except (OSError, ValueError) as error:
+        print(f"check-compose: could not read the settings - {error}", file=sys.stderr)
+        return 1
+    qa_env = {**os.environ, **QA_PLACEHOLDERS, **extra}
     throwaway = throwaway_problems(root)
     for problem in throwaway:
         print(f"check-compose: {problem}.", file=sys.stderr)
@@ -222,7 +240,7 @@ def main(root: Path = ROOT) -> int:
         renders = {
             "laptop": render(["-f", "compose.yaml", "--profile", "api"], dict(os.environ), root),
             "DEV": render(["-f", "compose.yaml", "-f", "compose.dev.yaml", "--profile", "api"],
-                          {**os.environ, **DEV_PLACEHOLDERS}, root),
+                          {**os.environ, **DEV_PLACEHOLDERS, **extra}, root),
             "QA": render(["-f", "compose.yaml", "-f", "compose.qa.yaml"], qa_env, root),
         }
     except (OSError, RuntimeError, ValueError) as error:
@@ -242,4 +260,8 @@ def main(root: Path = ROOT) -> int:
 
 
 if __name__ == "__main__":
+    # UTF-8 out, so an em dash prints on a Windows console's code page too (Book D45).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     raise SystemExit(main())

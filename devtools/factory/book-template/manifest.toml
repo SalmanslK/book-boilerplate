@@ -7,7 +7,7 @@
 # Bump `version` (semver, the same as factory.toml's book_version) with any change here, in
 # skeletons/ or in packs/; a copied Book carries the version it came from.
 
-version = "1.5.0"
+version = "1.6.0"
 
 # The guard hook's matcher must cover every tool it judges (N2).
 guard_matcher = ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Monitor", "Read",
@@ -21,11 +21,11 @@ guard_matcher = ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShe
 plugin = "book@book-plugins"
 # The oldest book plugin release this template's files work with. A Book pins the plugin to a release tag in
 # .claude/settings.json (`ref`); `book verify` refuses an unpinned or older one, and `book upgrade` names it (Book D39).
-plugin_min = "0.6.0"
+plugin_min = "0.7.0"
 skills = []
 
 # P folders: kept in git even when empty (N19), created with a .gitkeep by init.
-folders = ["docs/plans", "docs/archive", "docs/Audit", "requirements/fsd"]
+folders = ["docs/plans", "docs/archive", "docs/Audit", "docs/requirements", "requirements/fsd"]
 
 # The names the template's own files carry: init replaces these with the new project's names.
 [source]
@@ -53,12 +53,15 @@ book = [
   "docs/plans/_template.md",
   "devtools/book.py", "devtools/factory/factory.py", "devtools/factory/bitbucket.py", "devtools/factory/jira.py",
   "devtools/factory/drive.py", "devtools/factory/deploy.py", "devtools/factory/book.py",
-  "devtools/factory/snapshots.py", "devtools/factory/fixture_project.py",
+  "devtools/factory/snapshots.py", "devtools/factory/fixture_project.py", "devtools/factory/book_config.py",
+  "devtools/factory/book_migrate.py",
+  "devtools/factory/book-defaults.toml", "devtools/factory/book-defaults/none.toml",
+  ".claude/book/rules.md", ".claude/book/docs.md", ".claude/book/tests.md",
   "devtools/factory/test_*.py", "devtools/factory/hooks/*", "devtools/factory/book-template/**/*",
   "devtools/checks/check-book.py", "devtools/checks/check-rules.py", "devtools/checks/gen-task-rollup.py",
   "devtools/checks/check-protected-paths.py", "devtools/checks/check-private-data.py",
   "devtools/checks/check-commit-msg.py", "devtools/checks/check-code-rules.py", "devtools/checks/check-skills.py",
-  "devtools/checks/task-evidence.py", "devtools/checks/test-trend.py", "devtools/checks/ledger_ids.py", "devtools/checks/run-self-tests.py",
+  "devtools/checks/task-evidence.py", "devtools/checks/test-trend.py", "devtools/checks/ledger_ids.py", "devtools/checks/requirements_register.py", "devtools/checks/run-self-tests.py",
   "devtools/checks/test_checks.py", "devtools/checks/ci-local.sh",
 ]
 
@@ -92,19 +95,25 @@ book = [
 "devtools/checks/private-data-accepted.txt" = "private-data-accepted.txt.tmpl"
 
 # The packs. Each one's files are packs/<pack>/<target path>; `skeletons` and `folders` as above.
-# `factory-append.toml` in a pack is appended to factory.toml when init created it.
-# A pack's `instructions` (its nested CLAUDE.md files) and `owners` (its owner documents) are rows init
-# writes into the root CLAUDE.md's two tables, the names replaced, so a new Book lists what it installed.
+# `factory-append.toml` in a pack is appended to factory.toml when init created it: only what is the project's
+# own (its hosts, its names). What every Book with the pack shares is the pack's
+# devtools/factory/book-defaults/<pack>.toml, a pack file like any other.
+# A pack's `instructions` (its nested CLAUDE.md files) are rows init writes into the root CLAUDE.md's table, the
+# names replaced, so a new Book lists what it installed. Its `imports` are its Book rules files, which the root
+# CLAUDE.md imports; its owner documents' rows are in them. `owners` is kept for the upgrade from a Book whose
+# CLAUDE.md held those rows.
 [packs.dotnet]
-skeletons = {}
+# Its nested CLAUDE.md files are the project's (skeletons), each importing the Book's rules for its folder
+# from .claude/book/dotnet/, a pack file like any other.
+skeletons = { "src/CLAUDE.md" = "dotnet-src-CLAUDE.md.tmpl", "src/Boilerplate.API/CLAUDE.md" = "dotnet-api-CLAUDE.md.tmpl", "src/Boilerplate.Persistence/CLAUDE.md" = "dotnet-persistence-CLAUDE.md.tmpl", "tests/CLAUDE.md" = "dotnet-tests-CLAUDE.md.tmpl" }
 folders = []
 instructions = [
     { file = "src/CLAUDE.md", says = "the code rules: dependencies, structure, style, behaviour, security, database" },
     { file = "src/Boilerplate.Persistence/CLAUDE.md", says = "migrations, the idempotent script, `dotnet ef` safety" },
     { file = "src/Boilerplate.API/CLAUDE.md", says = "endpoints, regenerating the API contracts, settings" },
 ]
-# Its review dimensions (B1-B11 in `.claude/review/`, and its review-scope.toml) take the place of the
-# plugin's core B0 file.
+# Its review dimensions (B1-B11 in `.claude/review/`, and [review_scope] in its defaults file) take the place
+# of the plugin's core B0 file.
 
 [packs.pytest]
 skeletons = {}
@@ -113,6 +122,7 @@ folders = []
 [packs.deploy]
 skeletons = { "docs/e2e-testing.md" = "owned.md.tmpl", "docs/dev-smoke-test-suite.md" = "owned.md.tmpl" }
 folders = []
+imports = [".claude/book/deploy.md"]
 owners = [
     { topic = "Verifying a deployed environment, and the last run's result", owner = "`docs/e2e-testing.md`" },
     { topic = "Which rows of QA's smoke checklist the smoke tests prove", owner = "`docs/dev-smoke-test-suite.md`" },
@@ -132,10 +142,5 @@ owners = [
     { topic = "What one QA build delivered (a dated snapshot)", owner = "`docs/release-notes/`" },
     { topic = "How a screen works where the requirements and the wireframes are silent", owner = "`docs/ui-standard.md`" },
 ]
-# Rules for the root CLAUDE.md's Features list, which name this pack's own check.
-features = [
-    """- **An API change reaches the guide of the module it changed, in the same branch**: each changed route in
-  `docs/api/api-contracts.md` has an owner guide — by its title, its **Base:** path, or `[fe_guides] owners`
-  in `devtools/factory/factory.toml` with a reason — and that guide's *Last checked against the code* line
-  moves *[enforced: `check-fe-guides.py`, CI]*.""",
-]
+# The Book's rules files this pack adds, which the root CLAUDE.md imports after the Book's own.
+imports = [".claude/book/fe-guides.md"]

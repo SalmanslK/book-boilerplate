@@ -70,6 +70,10 @@ The plugin is pinned to a release tag (`ref` in `.claude/settings.json`'s `extra
 new plugin release reaches the project only through a reviewed change: take one by moving `ref` in a pull
 request. `book verify` refuses an unpinned plugin or one older than the template needs.
 
+**Installing the plugin rewrites `.claude/settings.json`.** `claude plugin install book@book-plugins --scope
+project` writes the file back with its keys in another order and no change to what it says, so `git status` shows
+it changed. That is harmless: revert it with `git checkout .claude/settings.json`.
+
 ## Agents
 
 | Agent | Use it to |

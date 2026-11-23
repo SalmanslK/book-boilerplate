@@ -5,7 +5,9 @@
 ## How to use it
 
 Every open question carries a **Recommendation:** line, which is what gets built unless the Answer says
-otherwise. Status is one of `OPEN` · `ANSWERED` · `SUPERSEDED`. An answered question moves to
+otherwise. Each has a **State** on one line under its heading — `OPEN · NOT POSTED`, `OPEN · POSTED`,
+`ANSWERED · THREAD ONLY` or `RESOLVED` — with its fields ([the Book's rules for
+documents](../.claude/book/docs.md#questions)). A RESOLVED question moves to
 [`archive/questions-resolved.md`](archive/questions-resolved.md), leaving one line under *Resolved*.
 
 ### Which document wins
@@ -17,9 +19,6 @@ otherwise. Status is one of `OPEN` · `ANSWERED` · `SUPERSEDED`. An answered qu
 | The specification is *silent* | Use the supporting documents; they are the best evidence there is |
 | The specification contradicts **itself** | Precedence does not help. Ask |
 
-**Status key:** `OPEN` · `ANSWERED` (a rule is in force — see [Resolved](#resolved)) · `SUPERSEDED`
-(overtaken by another question). Nothing else.
-
 ## Still open
 
 ### Anyone
@@ -28,8 +27,15 @@ None open.
 
 ### The open questions in full
 
-Each one is a `#### Q<n> · <title>` heading, then `**Status:** OPEN · **Raised:** <date> · **Area:** <§>`,
-the question in plain words, and a `**Recommendation:**` line.
+Each one is a `#### Q<n> · <title>` heading, then `**State:** OPEN · NOT POSTED · **Posted:** — ·
+**Answered:** — · **In FSD text:** not yet · **Thread resolved:** no`, the question in plain words, and a
+`**Recommendation:**` line.
+
+## Answered, waiting for the FSD text
+
+The BA has answered in the thread; the FSD text does not say it yet. The code follows the answer.
+
+None.
 
 ## Superseded
 
@@ -39,6 +45,21 @@ None.
 
 One line per decision, by topic, stating the rule in force. Decided by the owner with the v1.0.0 build
 plan; the reasoning is in [`architecture.md`](architecture.md).
+
+### Common rules and settings (v1.6)
+
+- **The Book's common rules live in `.claude/book/`** (`rules.md`, `docs.md`, `tests.md`, and a pack's own),
+  imported by each `CLAUDE.md` with `@`; the project's `CLAUDE.md` keeps only its own rules.
+- **Settings are `factory.toml` over the Book's defaults** (`book-defaults.toml`, then the stack's and each
+  pack's): a table merges by key, a list replaces, a list of tables with `id` merges by id, and
+  `[extend.<table>]` appends to a list. Every reader reads the merged view (`book_config.py`).
+- **The deploy guard's DEV/QA-only rule is code, never a setting**; the settings name hosts, not which
+  environments may be deployed to.
+- **Drift is checked against a lock** (`devtools/factory/book-files.lock`), written by init and upgrade; a
+  project's change to a Book file fails check-book unless `[book] drift_accepted` names it with a reason.
+- **A defect has a Type and a Source**, replacing *Class* and *Found by*; a question has a **State**. Rows from
+  before the columns warn until `[book] type_source_from`.
+- **A pack's optional document can be skipped** with `[book] skip_skeletons`.
 
 ### Layout and naming
 

@@ -15,7 +15,7 @@ and where feature state lives. Do not invent parallel rules here.
 - Feature plan in `docs/plans/` + row in `docs/project.md` before code
 - Open questions → `docs/open-questions.md`; defects → `docs/defects.md`
 - Prefer project skills (`/book:self-review`, `/book:commit`, `/book:ship`, the docs skills) over ad hoc process
-- Skills live under `.claude/skills/`, which Cursor loads directly
+- The Book's skills come from the book plugin (`/book:<name>`); a project's own, if any, go under `.claude/skills/`.
 - Each folder with its own `CLAUDE.md` has a scoped rule beside this one that points at it
 - Never commit to a protected branch directly — open a pull request
 - The specification wins every requirements conflict
