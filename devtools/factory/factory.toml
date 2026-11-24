@@ -5,7 +5,7 @@
 #
 # `book init` writes a project's copy from book-template/skeletons/factory.toml.tmpl.
 
-book_version = "1.6.3"
+book_version = "1.6.4"
 base_ref = "origin/main"
 protected_branches = ["main"]
 # Each person's private settings file — outside every repository, never read by a session
