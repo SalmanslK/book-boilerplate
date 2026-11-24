@@ -69,6 +69,8 @@ the documents init wrote from skeletons, plans, ledgers, `requirements/`.
 What a person does by hand when taking a release; the fixes themselves are in
 [`docs/defects.md`](docs/defects.md#fixed).
 
+**1.6.3** (book plugin v0.7.0, unchanged): one fix. A second self-test copied into every project built a fresh Book from the project's own plan template, so it failed in a project whose copy differs; it now runs only in the Book's own repository. A 1.6.2 project upgrades with `book upgrade --apply`; nothing is done by hand.
+
 **1.6.2** (book plugin v0.7.0, unchanged): one fix. A self-test copied into every project scanned the project's own
 docs and README for project names, so it failed in every real project; it now scans them only in the Book's own repository
 and the shipped template everywhere. A 1.6.1 project upgrades with `book upgrade --apply`; nothing is done by hand.

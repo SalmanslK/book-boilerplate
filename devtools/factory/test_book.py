@@ -1944,6 +1944,10 @@ class TheRealTemplate(unittest.TestCase):
         # Book D102: the dotnet rules linked to the deploy pack's smoke-test doc, so a dotnet Book without that
         # pack failed check-book's Links at its first commit.
         root = HERE.parents[1]
+        # `init` copies the shared documents (docs/plans/_template.md) from this repository, so a project's own
+        # wording would be tested here, not the Book's: only the Book's own repository holds it to this (Book D105).
+        if tomllib.loads((HERE / "factory.toml").read_text(encoding="utf-8")).get("book", {}).get("slug") != "boilerplate":
+            return
         for stack, packs in (("dotnet", ["fe-guides"]), ("dotnet", []), ("dotnet", ["bitbucket"]),
                              ("dotnet", ["deploy"]), ("pytest", ["fe-guides"])):
             with self.subTest(stack=stack, packs=packs), tempfile.TemporaryDirectory(prefix="book-links-") as folder:
