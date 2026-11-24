@@ -1859,9 +1859,13 @@ class TheRealTemplate(unittest.TestCase):
                  ("aspir", "ation"), ("canis", "ter")]
         pattern = re.compile("|".join(a + b for a, b in names), re.IGNORECASE)
         root = HERE.parents[1]
-        files = [p for folder in ("docs", "devtools/factory/book-template") for p in (root / folder).rglob("*")
+        # This file is copied into every project, whose own docs name the project: only the Book's own
+        # repository (slug "boilerplate") holds its docs and README to this; a project holds the template.
+        slug = tomllib.loads((HERE / "factory.toml").read_text(encoding="utf-8")).get("book", {}).get("slug")
+        folders = ("docs", "devtools/factory/book-template") if slug == "boilerplate" else ("devtools/factory/book-template",)
+        files = [p for folder in folders for p in (root / folder).rglob("*")
                  if p.is_file() and p.suffix in (".md", ".toml", ".tmpl", ".yml", ".py", ".sh", ".txt")
-                 and "__pycache__" not in p.parts] + [root / "README.md"]
+                 and "__pycache__" not in p.parts] + ([root / "README.md"] if slug == "boilerplate" else [])
         hits = [f"{p.relative_to(root)}: {m.group(0)}" for p in files
                 for m in [pattern.search(p.read_text(encoding="utf-8", errors="replace"))] if m]
         self.assertEqual(hits, [])

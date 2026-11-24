@@ -132,3 +132,4 @@ One line per fixed defect: id, what it was, and the commit or release that fixed
 - **D101** — the hook and local CI took any mention of `check-test-setup.py` for a decline. Fixed in v1.6.1.
 - **D102** — the dotnet rules linked to documents another pack creates. Fixed in v1.6.1.
 - **D103** — nothing said a project that declines `check-test-setup.py` must rewrite the rules table. Fixed in v1.6.1.
+- **D104** — a self-test copied into every project scanned the project's own docs for names, so it failed in every real project. Fixed in v1.6.2.
