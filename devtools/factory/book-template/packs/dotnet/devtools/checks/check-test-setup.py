@@ -8,9 +8,9 @@ Two rules about how an integration test gets its server and its database, run on
 
 - test-host: no integration test class builds its own host. xUnit builds the class again for every
   test, so a host built in a constructor, a field initializer or a helper is started once per test;
-  hosts started that way can accumulate (a leak risk a sister project saw), and the cost here is not yet
+  hosts started that way can accumulate (a leak risk seen in another project), and the cost here is not yet
   measured. A class
-  shares its fixture's host - `IntegrationTestWebAppFactory.SharedStubUserHost` for a class whose tests
+  shares its fixture's host - the fixture's shared stub-user host for a class whose tests
   differ only in who calls. A hit is `WithWebHostBuilder(`, `WithProductCaller(`, `new
   WebApplicationFactory<`, `new IntegrationTestWebAppFactory(` (or the target-typed `= new(`), a class
   that derives from either factory, `new TestServer(` or `WebApplication.CreateBuilder` outside `Fixtures/`.
@@ -169,7 +169,7 @@ def problems(root: Path = ROOT, staged: bool = False) -> list[str]:
         for file, number in files.items():
             if (rule, file) not in covered:
                 result.append(f"{tests}/{file}: {number} {rule} hit(s) - "
-                              + ("a test builds its own host; share the fixture's host (SharedStubUserHost), "
+                              + ("a test builds its own host; share the fixture's shared host, "
                                  "or add an allow-list entry with the reason it cannot"
                                  if rule == "test-host" else
                                  "a test sets up its own database; use the fixture's, or add an allow-list "

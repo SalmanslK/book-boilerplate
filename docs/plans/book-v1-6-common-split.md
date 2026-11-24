@@ -72,7 +72,7 @@ its copy to fit, the edit becomes a setting, so the code is the Book's again:
 | Edit | Setting |
 |---|---|
 | A rewritten snapshot accepted on one commit (check-protected-paths' `ACCEPTED`) | `[guard] accepted_rewrites = [{ commit, path, reason }]` |
-| An extra placeholder a Compose render needs (check-compose's `PLACEHOLDERS`) | `[deploy.compose] placeholders = { NAME = "value" }` |
+| An extra placeholder a Compose render needs (check-compose's `QA_PLACEHOLDERS`) | `[deploy.compose_placeholders]`, `NAME = "value"` |
 | The test database's name and the extra packages of the daily run (ci-daily.sh) | `[ci_daily] test_database`, `apt_packages` |
 | A module's heading in the ERD, and the ERD's tenancy wording and notes (gen-database-erd.py) | `[database_erd] titles`, `scoping`, `notes` |
 | An archived question kept under a `##` heading (check-book) | none: check-book accepts both shapes |
@@ -237,6 +237,14 @@ register in use first:
 - **A delta-pass section of an old audit** (rows added by a later pass under their own heading) converts to a
   register file of its own, which the import names in a CONFIRM line; merging it into its module is a
   person's step for now.
+
+### 9.2 Planned for the next minor release: project checks in the hooks
+
+A project cannot add its own check to the pre-commit hook, `ci-local.sh` or CI without declining those
+files (`[book] declined`), which then stop receiving the Book's updates (defect D97, a known limit of 1.6).
+Planned: a settings hook, for example `[checks] project_pre_commit`, `project_ci_local` and `project_ci`,
+each a list of commands the Book's own files run after the Book's checks, so a project adds a check
+without owning the file.
 
 ## 10. Tasks
 

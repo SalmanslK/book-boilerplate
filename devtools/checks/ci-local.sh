@@ -143,6 +143,9 @@ if [ -f devtools/checks/check-fe-guides.py ]; then
 fi
 if [ -f devtools/checks/check-test-setup.py ]; then
     $py devtools/checks/check-test-setup.py || fail "check-test-setup.py"
+elif $py devtools/book.py config --json book.declined 2>/dev/null | grep -q '"devtools/checks/check-test-setup.py"'; then
+    # Named in `[book] declined` (the merged settings), not merely mentioned in factory.toml.
+    echo "check-test-setup.py: declined in this project ([book] declined): skipped."
 fi
 if [ -f devtools/checks/check-dotnet.py ]; then
     $py devtools/checks/check-dotnet.py || fail "check-dotnet.py"

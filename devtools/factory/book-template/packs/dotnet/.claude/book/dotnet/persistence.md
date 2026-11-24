@@ -56,7 +56,7 @@ psql -d app_script_check -v ON_ERROR_STOP=1 -f migrate.sql
   Declare indexes in the configuration (`HasIndex`): an `[Index(…)]` attribute is not read.
 - Never add `Where(x => x.TenantId == …)` by hand. Never `IgnoreQueryFilters` without
   an allow-list entry and a reason — `QueryFilterBypassTests` fails the build on a new
-  bypass *(not enforced yet: add a `QueryFilterBypassTests` architecture test, then mark it `[enforced: …]`)*.
+  bypass *(enforced where the project's check exists, for example a `QueryFilterBypassTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*.
 
 ## `dotnet ef` safety
 

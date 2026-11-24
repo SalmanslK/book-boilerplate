@@ -452,8 +452,12 @@ def n7_owners_exist(ctx: Context) -> list[Line]:
     tokens = owner_tokens(text)
     if not tokens:
         return [Line(WRONG, name, "CLAUDE.md has no owner table under \"Where knowledge lives\"")]
+    # A document the project declined (`[book] skip_skeletons`) stays in the imported owner tables; it is not required.
+    skipped = skipped_skeletons(ctx.config) | book_config.declined_files(ctx.config.get("book") or {})
     missing = []
     for token in tokens:
+        if token in skipped:
+            continue
         if "<" in token:  # a naming pattern: its folder is what must exist
             folder = token.split("<", 1)[0].rsplit("/", 1)[0]
             if folder and not (ctx.root / folder).is_dir():
@@ -1764,6 +1768,7 @@ def upgrade(target: Path, config: dict, manifest: dict, template_root: Path, app
     notes += pack_skeleton_notes(target, manifest, packs, skipped_skeletons(config),
                                  substitutions(manifest, params))
     notes += deploy_notes(config)
+    notes += declined_rules_notes(target, config)
     if unoffered:
         notes.append(f"{len(unoffered)} rename stub(s) not offered: the installed version had none of these old "
                      f"names ({', '.join(sorted(rel.split('/')[2] for rel in unoffered))})")
@@ -2266,6 +2271,25 @@ def long_lived_notes(target: Path, config: dict, run: Runner) -> list[str]:
 # What /book:deploy reads from [deploy]: what deploy.py needs before it runs (`target()`), and the keys v1.4.0
 # added for the skill's project facts, which a Book from before it has not got.
 DEPLOY_ADDED = ("runbook", "audit_record")
+
+
+def declined_rules_notes(target: Path, config: dict) -> list[str]:
+    """
+    A project that declines `check-test-setup.py` (Book D103): the rules table in devtools/README.md names its two
+    rules by the checks that run them, and says "declined" once `check-rules.py --write` has rewritten it; until
+    then `check-rules --check` and the pre-commit hook fail with "table is stale". The one step a person takes.
+    """
+    declined = book_config.declined_files((config.get("book") or {}))
+    if "devtools/checks/check-test-setup.py" not in declined:
+        return []
+    readme = target / "devtools" / "README.md"
+    rows = [l for l in readme.read_text(encoding="utf-8", errors="replace").splitlines()
+            if "check-test-setup.py" in l and l.startswith("|")] if readme.is_file() else []
+    if not rows or all("declined" in row for row in rows):
+        return []
+    return [f"{CONFIRM} check-test-setup.py is declined, so devtools/README.md's rules table is stale: run "
+            "`python devtools/checks/check-rules.py --write` and commit it, or `check-rules --check` and the "
+            "pre-commit hook fail"]
 
 
 def deploy_notes(config: dict) -> list[str]:

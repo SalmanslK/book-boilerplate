@@ -41,35 +41,33 @@ Structure ([why](../../../docs/architecture.md#2-where-classes-live)):
   a read that runs before options exist is a `config-by-literal` allow-list entry with its reason
   *[enforced: `check-code-rules.py`, pre-commit + CI]*.
 - Never reference EF Core, Npgsql or ASP.NET Core from Domain or Application
-  *(not enforced yet: add a `LayerDependencyTests` architecture test, then mark it `[enforced: …]`)* — fix the design, do not suppress.
+  *(enforced where the project's check exists, for example a `LayerDependencyTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)* — fix the design, do not suppress.
 
 Style ([why](../../../docs/architecture.md#13-naming); [time](../../../docs/architecture.md#10-cross-cutting-decisions); [LINQ](../../../docs/architecture.md#linq-method-syntax-and-correlated-subqueries)):
 
 - `sealed` and `readonly` by default; primary constructors where they read better;
   records for immutable request and response shapes; `IReadOnlyCollection<T>` on the
   way out; nullable reference types on; explicit access modifiers. Handlers and entity
-  configurations are `sealed` and `internal` *(not enforced yet: add a `ConventionTests` architecture test, then mark it `[enforced: …]`)*.
+  configurations are `sealed` and `internal` *(enforced where the project's check exists, for example a `ConventionTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*.
 - **No null-forgiving operator (`!`).** Prove it with a guard or null check.
 - **No regions, service locator, static mutable state, magic strings or numbers.** No
   interface or base class without a second implementer in sight; no repository method
   that renames an EF Core method one-for-one. A string that must match another — a
   tag, an endpoint name, a lock key, a validator message — is one constant beside the
   code that owns it, never a global `Constants` class
-  ([what counts](../../../docs/architecture.md#14-what-not-to-build)) *(not enforced yet:
-  add a `StringConstantRuleTests` architecture test, then mark it `[enforced: …]`)*.
+  ([what counts](../../../docs/architecture.md#14-what-not-to-build)) *(enforced where the project's check exists, for example a `StringConstantRuleTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*.
 - **Rename unclear code rather than comment it.** No commented-out code.
 - **No `TODO` for a requirement already known** — build it, or track it as a Q or D.
-- **LINQ is method syntax, never query syntax** *(not enforced yet: add a `ProductCodeRuleTests` architecture test, then mark it `[enforced: …]`)*.
+- **LINQ is method syntax, never query syntax** *(enforced where the project's check exists, for example a `ProductCodeRuleTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*.
   Where query syntax would be a `join`, prefer a correlated subquery.
 - **`Single`/`SingleOrDefault` over `First`/`FirstOrDefault`** when at most one row
   should match. `First` only where several matches are legitimate — and then order
-  the query; an unordered `First` is an allow-list entry with its reason *(not enforced yet:
-  add a `ProductCodeRuleTests` architecture test, then mark it `[enforced: …]`)*. **A read that bypasses the soft-delete filter can meet a
+  the query; an unordered `First` is an allow-list entry with its reason *(enforced where the project's check exists, for example a `ProductCodeRuleTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*. **A read that bypasses the soft-delete filter can meet a
   deleted row beside the live one** (a reused email) — order it, never `Single`.
 - Names say what the type is (`CreateCompanyCommand`, `ICompanyReadRepository`, `CompanyDto`,
   `CompanyMappings`, `CompanyErrors`); commands and queries are named for what they are.
   **Never `Helper`, `Manager`, `Processor`, `Utility`, `DataService` or
-  `CommonService`** as a type name's last word. Both *(not enforced yet: add a `ConventionTests` architecture test, then mark it `[enforced: …]`)*.
+  `CommonService`** as a type name's last word. Both *(enforced where the project's check exists, for example a `ConventionTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*.
 - **Generic by default, explicit by necessity.** When two rules collide, say which two
   and which you kept.
 
@@ -78,16 +76,16 @@ Behaviour ([why](../../../docs/architecture.md#7-cqrs-and-the-dispatcher); [audi
 - **Handlers own their save.** A create handler must save before returning a
   database-generated id.
 - **Two saves that must succeed together go in `IUnitOfWork.ExecuteInTransactionAsync`**
-  — never `BeginTransaction`/`Commit`/`Rollback` *(not enforced yet: add a `TransactionRuleTests` architecture test, then mark it `[enforced: …]`)*. The
+  — never `BeginTransaction`/`Commit`/`Rollback` *(enforced where the project's check exists, for example a `TransactionRuleTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*. The
   block may run more than once, so it must be safe to repeat.
 - **Multi-tenant: a new aggregate implements `ITenantScoped` unless it is shared
-  reference data** *(not enforced yet: add a `TenancyTests` architecture test, then mark it `[enforced: …]`)*; opting out is an allow-list entry
-  with a reason. Never pass a tenant id into a domain method *(not enforced yet: add a `TenancyTests` architecture test, then mark it `[enforced: …]`)*; never add
+  reference data** *(enforced where the project's check exists, for example a `TenancyTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*; opting out is an allow-list entry
+  with a reason. Never pass a tenant id into a domain method *(enforced where the project's check exists, for example a `TenancyTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*; never add
   `Where(x => x.TenantId == …)` by hand. **Prove isolation with a two-tenant
   integration test** ([`tests/CLAUDE.md`](tests.md)).
-- **Anything that belongs to a company implements `ICompanyScoped`** — a session sees only
+- **Anything that belongs to a company implements the project's company-scope interface** (the marker interface the project's entities carry) — a session sees only
   its company's rows, and nothing in none. Opt-in; `CompanyId` is stamped on insert, never
-  set by a caller; a scoped aggregate is also tenant-scoped *(not enforced yet: add a `TenancyTests` architecture test, then mark it `[enforced: …]`)*.
+  set by a caller; a scoped aggregate is also tenant-scoped *(enforced where the project's check exists, for example a `TenancyTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*.
 - **Deletes are soft** (`ISoftDeletable`, `repository.Remove(entity)`) — never a hand
   hard delete. **Deleted is not inactive**: deleted is invisible, inactive is visible
   and labelled.
@@ -98,27 +96,24 @@ Behaviour ([why](../../../docs/architecture.md#7-cqrs-and-the-dispatcher); [audi
 - **Trust the bytes, not the file name or content type** — the format comes from the
   leading bytes.
 - **Audit actors are user ids, resolved to names on read — every auditable entity, no
-  exceptions** *(not enforced yet: add a `AuditingTests` architecture test, then mark it `[enforced: …]`)*. `CreatedBy`/`ModifiedBy`/`DeletedBy` are
-  `long?` FKs to `users` with `Restrict` and **no navigation property** *(not enforced yet:
-  add a `PersistenceModelTests` architecture test, then mark it `[enforced: …]`)*; null renders
+  exceptions** *(enforced where the project's check exists, for example a `AuditingTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*. `CreatedBy`/`ModifiedBy`/`DeletedBy` are
+  `long?` FKs to `users` with `Restrict` and **no navigation property** *(enforced where the project's check exists, for example a `PersistenceModelTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*; null renders
   as "System", `-`, and not-deleted respectively. Resolve names through `AuditActor`,
-  never `IgnoreQueryFilters` *(not enforced yet: add a `QueryFilterBypassTests` architecture test, then mark it `[enforced: …]`)*. Detail DTOs only,
+  never `IgnoreQueryFilters` *(enforced where the project's check exists, for example a `QueryFilterBypassTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*. Detail DTOs only,
   carrying both `createdById` and `createdBy`. **Never store the name.** Authentication metadata
   must not travel through auditing.
 - **Never call `DateTime.UtcNow` or `DateTimeOffset.UtcNow`** — inject `TimeProvider`
-  or pass the time in. **Timestamps are `DateTimeOffset`.** Both *(not enforced yet:
-  add a `DateTimeUsageTests` architecture test, then mark it `[enforced: …]`)*.
+  or pass the time in. **Timestamps are `DateTimeOffset`.** Both *(enforced where the project's check exists, for example a `DateTimeUsageTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*.
 - **`Result<T>` for expected failures**; exceptions are for faults. Handlers never
   return `IResult`.
 - **Never catch broadly to keep a request alive.** Catch only the specific exception
   you can map to a `Result` or log and rethrow. The exceptions are the background
   workers' loops (outbox, documents, the clean-up workers), which log a failed item and
   carry on. A new
-  `catch (Exception)` or bare `catch` is an allow-list entry with its reason *(not enforced yet:
-  add a `ProductCodeRuleTests` architecture test, then mark it `[enforced: …]`)*.
+  `catch (Exception)` or bare `catch` is an allow-list entry with its reason *(enforced where the project's check exists, for example a `ProductCodeRuleTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*.
 - **`CancellationToken` flows all the way through** — no `CancellationToken.None` in
   product code. **Never block on async** (`.Result`, `.Wait()`,
-  `.GetAwaiter().GetResult()`). Both *(not enforced yet: add a `ProductCodeRuleTests` architecture test, then mark it `[enforced: …]`)*.
+  `.GetAwaiter().GetResult()`). Both *(enforced where the project's check exists, for example a `ProductCodeRuleTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*.
 - **No external side effect in a domain event handler** — no email, no HTTP call. A
   handler runs after the save, and an external effect cannot be rolled back
   *[enforced: `check-code-rules.py`, pre-commit + CI]*.
@@ -128,7 +123,7 @@ Behaviour ([why](../../../docs/architecture.md#7-cqrs-and-the-dispatcher); [audi
   that same save; a worker sends it with retries. The port sends and saves nothing.
   ([architecture guide](../../../docs/architecture.md#external-side-effects-email-and-http))
 - Endpoints dispatch through `ISender` — no logic, repositories or `DbContext`
-  *(not enforced yet: add a `EndpointIsolationTests` architecture test, then mark it `[enforced: …]`)*.
+  *(enforced where the project's check exists, for example a `EndpointIsolationTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*.
 - **Authorization is default-deny**: every `.AllowAnonymous()` is an `anonymous-route` allow-list entry,
   counted per file, with its reason *[enforced: `check-code-rules.py`, pre-commit + CI]*.
 - Repositories are for **aggregate roots only**.
@@ -142,7 +137,7 @@ Behaviour ([why](../../../docs/architecture.md#7-cqrs-and-the-dispatcher); [audi
 - **A validated request's list of objects or strings validates its items**: `RuleForEach(x => x.Items).NotNull()`
   (or `NotEmpty()`), so `[null]` is a 400, not a 500; a list that may hold a null on purpose is a
   `[dotnet_checks] list_items_nullable` entry with its reason *[enforced: `check-dotnet.py`, pre-commit + CI]*.
-- Validators measure trimmed lengths *(not enforced yet: add a `UntrimmedLengthRuleTests` architecture test, then mark it `[enforced: …]`)*.
+- Validators measure trimmed lengths *(enforced where the project's check exists, for example a `UntrimmedLengthRuleTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*.
 
 Security ([logging](../../../docs/architecture.md#10-cross-cutting-decisions)):
 
@@ -158,7 +153,7 @@ Security ([logging](../../../docs/architecture.md#10-cross-cutting-decisions)):
   the area's `*Log` class, with an event id from its range — never a direct
   `logger.Log…` call, never string interpolation
   ([why and the ranges](../../../docs/architecture.md#10-cross-cutting-decisions))
-  *(not enforced yet: add a `ProductCodeRuleTests` architecture test, then mark it `[enforced: …]`)*.
+  *(enforced where the project's check exists, for example a `ProductCodeRuleTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*.
 - Never put a secret in a commit message, branch name or test fixture.
 
 Database — full rules in [`src/Boilerplate.Persistence/CLAUDE.md`](persistence.md):

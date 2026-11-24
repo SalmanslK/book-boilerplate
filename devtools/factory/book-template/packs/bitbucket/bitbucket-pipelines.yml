@@ -458,7 +458,7 @@ definitions:
           - python3 devtools/checks/gen-task-rollup.py --check
           # Every rule CLAUDE.md marks [enforced] still names a test or check that exists and runs here.
           - python3 devtools/checks/check-rules.py --check
-          - python3 devtools/checks/check-test-setup.py
+          - if [ -f devtools/checks/check-test-setup.py ]; then python3 devtools/checks/check-test-setup.py; else echo "check-test-setup.py is not in this project (declined), skipped."; fi
           # Every step on our runner with a time limit, and no pipeline on every push.
           - python3 devtools/checks/check-pipeline.py
 

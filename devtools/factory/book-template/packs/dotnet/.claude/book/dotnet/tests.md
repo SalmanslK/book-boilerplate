@@ -14,13 +14,13 @@ reasoning is in [`docs/architecture.md` §11](../../../docs/architecture.md#11-t
   asserts one cannot see the other's rows. `TenancyTests` only proves the interface is
   implemented, not that the filter holds end to end. Company-scoped features prove the
   company filter the same way.
-  Copy `CompanyScopedAggregateTests` — it proves the generic filter on a test-only aggregate
-  and fails if the filter is loosened.
+  Copy the project's existing proof of the generic filter, if it has one (for example a test on a test-only
+  aggregate that fails if the filter is loosened).
 - **A request body that carries a list is tried with a null element** (`{"ids":[null]}`):
   the answer is a refusal that names the problem, never a 500. No endpoint takes a list today;
   the first one writes the pattern.
 - **A list endpoint asserts a fixed query count**, independent of row count — the counter's use is
-  `SessionEndpointTests.The_call_costs_a_fixed_number_of_queries`; a list seeds rows between two
+  a test of an existing endpoint (for example `The_call_costs_a_fixed_number_of_queries`); a list seeds rows between two
   calls and asserts the same count.
   `IntegrationTestWebAppFactory.Queries` exposes the counter (`QueryCounter`,
   `QueryCountingInterceptor` in `IntegrationTests/Fixtures/`): reset it, make the call,
@@ -43,7 +43,7 @@ this is how.
   the layering, tenancy, auditing and registration rules one feature's tests never
   exercise.
 - **Integration — the module's folder, plus any class you changed:**
-  `dotnet test tests/Boilerplate.IntegrationTests --filter "FullyQualifiedName~Features.Companies|FullyQualifiedName~SessionEndpointTests"`.
+  `dotnet test tests/Boilerplate.IntegrationTests --filter "FullyQualifiedName~Features.<Module>|FullyQualifiedName~<AChangedClass>"`.
   A module's tests sit under `Features/<Module>/`. A change another module calls into
   — a delete guard, a lookup, a shared handler — takes that module's tests too.
 - **Read the counts.** `Total` must be the number you expected, not `0`: a mistyped
@@ -66,20 +66,18 @@ this is how.
 
 ## Hosts and databases
 
-- **A test class never starts its own server** *[enforced: `check-test-setup.py`, pre-commit + CI]* *(add a `TestSetupRuleTests` architecture test to enforce it in code too)*.
+- **A test class never starts its own server** *[enforced: `check-test-setup.py`, pre-commit + CI, where the project keeps that check]*.
   xUnit builds the class again for every test, so a host started in a constructor, a field
   initializer or a helper (`WithWebHostBuilder`, `WithProductCaller`, a new `WebApplicationFactory`)
-  starts once per test, and hosts started that way can pile up (the leak a sister project hit; the
-  cost here is not yet measured). Share the fixture's host. A class
-  whose tests differ only in who calls uses `IntegrationTestWebAppFactory.SharedStubUserHost`:
+  starts once per test, and hosts started that way can pile up (a leak seen in another project). Share the fixture's host. A class
+  whose tests differ only in who calls uses the fixture's shared stub-user host:
   `StartTest()` as the test starts resets the stub caller, so nothing of the last test is left, and
   rate limiting is off on it. Services the same for every test of the class (a fixed clock, a
-  context): `SharedStubUserHostWith(name, services)`, same stub. Tests that sign in for real:
-  `SharedProductCallerHost`. A class that needs services that change per test, a recording logger or its own
+  context): a variant of that host that takes the services, same stub. Tests that sign in for real: the fixture's shared real-sign-in host. A class that needs services that change per test, a recording logger or its own
   configuration may build a host in the one test that needs it, as an entry in
-  `tests/test-setup-allow-list.tsv` with the reason. The rate-limit classes keep their own hosts,
+  the check's allow-list (by default `tests/test-setup-allow-list.tsv`) with the reason. The rate-limit classes keep their own hosts,
   since limiter state is per host.
-- **A test never sets up its own database** *[enforced: `check-test-setup.py`, pre-commit + CI]* *(add a `TestSetupRuleTests` architecture test to enforce it in code too)*.
+- **A test never sets up its own database** *[enforced: `check-test-setup.py`, pre-commit + CI, where the project keeps that check]*.
   The fixture copies a template migrated once per run. `PostgreSqlBuilder`, `MigrateAsync` or
   `EnsureCreated` outside `Fixtures/` is an entry in the same allow-list, as the migration upgrade
   tests are, with the reason. An entry whose code is gone fails too, so the list only shrinks.
@@ -104,7 +102,7 @@ this is how.
 - Credentials come from the `BOILERPLATE_DEPLOYED_API_*` variables in the user's shell —
   never prompt for them, never print them. **Everything a run creates it deletes.**
   The variables and the rules that keep a shared host clean:
-  [`docs/dev-smoke-test-suite.md`](../../../docs/dev-smoke-test-suite.md) §1 and §4.
+  the deploy pack's `docs/dev-smoke-test-suite.md` §1 and §4, where the project has it.
 - The smoke tests use none of the product's DTOs, on purpose: they parse the wire
   format, so a serialization change cannot hide behind a shared type.
 

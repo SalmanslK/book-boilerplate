@@ -61,6 +61,16 @@ def settings(root: Path = ROOT) -> dict:
         return {}
 
 
+# The checks a pack owns that a project may decline: a rule naming one holds where the project keeps it. A
+# declined core check (check-book.py, check-commit-msg.py ...) is still "gone": the rule's enforcer is not there.
+OPTIONAL_CHECKS = ("check-test-setup.py",)
+
+
+def declined_checks(root: Path = ROOT) -> set[str]:
+    """`[book] declined`: the Book files this project does not keep."""
+    return book_config.declined_files(settings(root).get("book") or {})
+
+
 def ci_text(root: Path = ROOT) -> str:
     """The CI files and the local CI run, as one text: what "CI" in a marker means."""
     files = list((settings(root).get("checks") or {}).get("ci_files") or []) + [LOCAL_CI]
@@ -171,6 +181,9 @@ def judge(marker: str, classes: set[str], pipelines: str, precommit: str,
                 ran.append("CI tests")
         elif script:
             file = script.group(1)
+            if file in OPTIONAL_CHECKS and f"devtools/checks/{file}" in declined_checks(root):
+                ran.append("declined")  # the project declined the file: the rule holds where the project keeps it
+                continue
             if not tracked(f"devtools/*/{file}", root) and not tracked(f"devtools/{file}", root):
                 problems.append(f"{file} is gone")
                 continue

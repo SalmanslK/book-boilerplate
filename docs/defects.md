@@ -20,8 +20,7 @@ row, and when a finding is not a defect: [the Book's rules for documents](../.cl
 
 | Id | Sev | Status | Type | Source | Defect | Where | Note |
 |---|---|---|---|---|---|---|---|
-
-None open.
+| D97 | 🔵 | Open | tooling-ci | developer: the first project's Book upgrade | **Known limit:** a project cannot add its own check to the pre-commit hook, `ci-local.sh` or CI without declining those files, which then stop receiving the Book's updates | `.githooks/pre-commit`, `devtools/checks/ci-local.sh` | Not fixed in 1.6.1. Planned for the next minor release: a settings hook for project checks ([plan §9.2](plans/book-v1-6-common-split.md)); found 2026-11-24 |
 
 ### Numbering
 
@@ -123,3 +122,13 @@ One line per fixed defect: id, what it was, and the commit or release that fixed
 - **D90** — the 1.6 upgrade repeated its "run this" CONFIRMs after the work was done. Fixed in v1.6.0.
 - **D91** — a later run of the 1.6 move wrote back a `drift_accepted` list a person had removed. Fixed in v1.6.0.
 - **D92** — the requirements import gave an ambiguous status cell a status without saying so. Fixed in v1.6.0.
+- **D93** — `book verify` N7 required a file `[book] skip_skeletons` declines, because the fe-guides owner table names it. Fixed in v1.6.1.
+- **D94** — the dotnet rules sent Compose placeholders to `QA_PLACEHOLDERS` in `check-compose.py`, not `[deploy.compose_placeholders]`. Fixed in v1.6.1.
+- **D95** — the hook, local CI, pipeline and rules assumed `check-test-setup.py`, which a project may decline. Fixed in v1.6.1.
+- **D96** — the dotnet rules named another project's types and files, and called rules "not enforced yet" that a project may enforce. Fixed in v1.6.1.
+- **D98** — the dotnet review checklists named another project's scope interface and test class. Fixed in v1.6.1.
+- **D99** — the pipeline's test-setup step was not one YAML string. Fixed in v1.6.1.
+- **D100** — `check-rules.py` counted a declined core check as intact. Fixed in v1.6.1.
+- **D101** — the hook and local CI took any mention of `check-test-setup.py` for a decline. Fixed in v1.6.1.
+- **D102** — the dotnet rules linked to documents another pack creates. Fixed in v1.6.1.
+- **D103** — nothing said a project that declines `check-test-setup.py` must rewrite the rules table. Fixed in v1.6.1.

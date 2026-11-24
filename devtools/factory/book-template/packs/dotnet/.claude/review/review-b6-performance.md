@@ -15,7 +15,7 @@ Part of the review checklist; its method is `review-method.md`, in the book plug
 | 107 | Excessive network calls | Multiple round trips where one would do |
 | 108 | Sequential independent I/O that should be parallelized | Independent awaits chained instead of `Task.WhenAll` |
 | 109 | Excessive payload size | A response carrying fields no client needs (ties to *check 55*) |
-| 110 | Operation does not scale with expected data volume | A list endpoint's query cost should be **fixed**, not proportional to row count — see the `QueryCounter`/`QueryCountingInterceptor` pattern in `tests/Boilerplate.IntegrationTests/Fixtures/` and `BusinessUnitListQueryTests` for the assertion shape a new list endpoint should copy |
+| 110 | Operation does not scale with expected data volume | A list endpoint's query cost should be **fixed**, not proportional to row count — see the `QueryCounter`/`QueryCountingInterceptor` pattern in `tests/Boilerplate.IntegrationTests/Fixtures/` and an existing list endpoint's query-count test for the assertion shape a new list endpoint should copy |
 
 **Raise a performance finding only where the impact is credible at realistic
 volume** — this project's own multi-tenant scale, not a hypothetical.

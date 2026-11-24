@@ -58,6 +58,10 @@ for py in python3 python "py -3"; do
         # outside the allow-list. A stale allow-list entry is CI's and ci-local.sh's full run to find.
         if [ -f "$checks/check-test-setup.py" ]; then
             $py "$checks/check-test-setup.py" --staged
+        # The note shows only when `[book] declined` (the merged settings, not any mention in the file) names it.
+        elif $py "$root/devtools/book.py" config --json book.declined 2>/dev/null | grep -q '"devtools/checks/check-test-setup.py"'; then
+            echo "pre-commit: check-test-setup.py is declined in this project ([book] declined): test setup not checked." >&2
+            echo "  If the rules table does not say 'declined' for its two rules yet, run \`python devtools/checks/check-rules.py --write\` once." >&2
         fi
         # The dotnet pack's shape checks (list items, options validated on start, unique indexes), when this
         # commit stages C# or the allow-lists in factory.toml.

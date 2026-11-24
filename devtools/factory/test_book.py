@@ -320,6 +320,18 @@ class EachCheck(BookCase):
         os.remove(self.root / "docs/defects.md")
         self.assertFails(book.n7_owners_exist, book.MISSING)
 
+    def test_n7_honours_skip_skeletons_in_an_imported_owner_table(self):
+        # Book D93: the fe-guides pack's imported table names docs/ui-standard.md; a project that skipped it was told MISSING.
+        self.write(".claude/book/fe-guides.md", "## Where knowledge lives\n\n| Topic | Owner |\n|---|---|\n| Screens | `docs/ui-standard.md` |\n")
+        root = self.root / "CLAUDE.md"
+        root.write_text(root.read_text(encoding="utf-8").replace("## Git\n", "@.claude/book/fe-guides.md\n\n## Git\n", 1),
+                        encoding="utf-8", newline="\n")
+        lines = book.n7_owners_exist(self.ctx())
+        self.assertEqual([l.status for l in lines], [book.MISSING], [l.render() for l in lines])
+        self.assertIn("docs/ui-standard.md", lines[0].detail)
+        self.config('skip_skeletons = ["docs/ui-standard.md"]\n')
+        self.assertPasses(book.n7_owners_exist)
+
     def test_n8_archive(self):
         self.assertPasses(book.n8_archive)
         os.remove(self.root / "docs/archive/defects-closed.md")
@@ -1005,6 +1017,24 @@ class PackSkeletonNotes(unittest.TestCase):
             (target / "src/Acme.API").mkdir(parents=True)
             (target / "src/Acme.API/CLAUDE.md").write_text("# API\n", encoding="utf-8")
             self.assertEqual(book.pack_skeleton_notes(target, manifest, ["dotnet"], pairs=[("Widget", "Acme")]), [])
+
+    def test_declining_the_test_setup_check_names_the_rules_table_step_until_it_is_done(self):
+        # Book D103: the table is stale until `check-rules.py --write` runs, and the hook fails on it.
+        declined = {"book": {"declined": ["devtools/checks/check-test-setup.py"]}}
+        row = "| A test class never starts its own server | `tests/CLAUDE.md` | `check-test-setup.py` | {} | yes |\n"
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder)
+            self.assertEqual(book.declined_rules_notes(target, declined), [], "no README yet")
+            (target / "devtools").mkdir()
+            readme = target / "devtools" / "README.md"
+            readme.write_text(row.format("CI, pre-commit"), encoding="utf-8")
+            notes = book.declined_rules_notes(target, declined)
+            self.assertEqual(len(notes), 1)
+            self.assertTrue(notes[0].startswith(book.CONFIRM))
+            self.assertIn("check-rules.py --write", notes[0])
+            self.assertEqual(book.declined_rules_notes(target, {}), [], "kept: nothing to do")
+            readme.write_text(row.format("declined"), encoding="utf-8")
+            self.assertEqual(book.declined_rules_notes(target, declined), [], "written: nothing left")
 
     def test_a_skipped_skeleton_is_not_asked_for(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -1797,6 +1827,88 @@ class TheRealTemplate(unittest.TestCase):
         absent = [s for s in skeletons.values() if not (HERE / "book-template/skeletons" / s).is_file()]
         self.assertEqual(absent, [])
 
+    # Names that belong to the projects the dotnet rules were first written in. Written in two halves so this
+    # file does not itself carry them.
+    OTHER_PROJECTS_NAMES = tuple(a + b for a, b in (
+        ("Company", "Scoped"), ("Business", "Unit"), ("Shared", "StubUserHost"), ("Shared", "ProductCallerHost"),
+        ("Session", "EndpointTests"), ("sister", " project"), ("not enforced", " yet"), ("QA_", "PLACEHOLDERS")))
+
+    def test_the_dotnet_pack_names_no_other_projects_types_and_the_old_placeholder_home(self):
+        # Book D94, Book D96 and Book D98: the shipped text says "for example" and names the kind of thing, and
+        # points to settings; no rule, checklist or check names a type that only another project has.
+        pack = HERE / "book-template/packs/dotnet"
+        files = [p for p in pack.rglob("*") if p.is_file() and p.suffix in (".md", ".py", ".toml", ".sh")
+                 and "__pycache__" not in p.parts and not p.name.startswith("test_")]
+        self.assertTrue(files)
+        for path in files:
+            text = path.read_text(encoding="utf-8")
+            for taken in self.OTHER_PROJECTS_NAMES:
+                self.assertNotIn(taken, text, path.name)
+        folder = pack / ".claude/book/dotnet"
+        text = "\n".join((folder / name).read_text(encoding="utf-8") for name in ("src.md", "tests.md", "api.md"))
+        self.assertIn("[deploy.compose_placeholders]", text)
+        self.assertIn("where the project's check exists", text)
+        self.assertIn("where the project keeps that check", text)
+        security = " ".join((pack / ".claude/review/review-b4-security.md").read_text(encoding="utf-8").split())
+        self.assertIn("the project's scope interface", security)
+
+    def test_no_project_or_client_name_is_in_the_shipped_documents(self):
+        # The repository is public: the ledgers, README and template name no project or client. The names are
+        # written in halves so this file does not carry them.
+        names = [("nb", "ryo"), ("cattly", "tics"), ("emb", "ryo"), (r"\b" + "iv", r"f\b"), ("fol", "io"),
+                 ("aspir", "ation"), ("canis", "ter")]
+        pattern = re.compile("|".join(a + b for a, b in names), re.IGNORECASE)
+        root = HERE.parents[1]
+        files = [p for folder in ("docs", "devtools/factory/book-template") for p in (root / folder).rglob("*")
+                 if p.is_file() and p.suffix in (".md", ".toml", ".tmpl", ".yml", ".py", ".sh", ".txt")
+                 and "__pycache__" not in p.parts] + [root / "README.md"]
+        hits = [f"{p.relative_to(root)}: {m.group(0)}" for p in files
+                for m in [pattern.search(p.read_text(encoding="utf-8", errors="replace"))] if m]
+        self.assertEqual(hits, [])
+
+    @staticmethod
+    def script_items(text: str) -> list[tuple[int, str]]:
+        """The `- ` items under each `script:` key of a pipeline file, as (line number, text)."""
+        found, floor = [], None
+        for number, line in enumerate(text.splitlines(), 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            indent = len(line) - len(line.lstrip())
+            if floor is not None and indent <= floor:
+                floor = None
+            if floor is not None and stripped.startswith("- "):
+                found.append((number, stripped[2:]))
+            elif stripped == "script:":
+                floor = indent
+        return found
+
+    def test_every_pipeline_script_item_is_one_string(self):
+        # Book D99: an unquoted item holding a colon and a space is a one-key mapping, not a command.
+        pipelines = [p for p in (HERE / "book-template").rglob("*") if p.suffix in (".yml", ".yaml")]
+        self.assertTrue(pipelines)
+        for path in pipelines:
+            text = path.read_text(encoding="utf-8")
+            items = self.script_items(text)
+            self.assertTrue(items, path.name)
+            for number, item in items:
+                plain = not item.startswith(("'", '"', "|", ">"))
+                self.assertFalse(plain and re.search(r":(\s|$)", item), f"{path.name}:{number}: {item}")
+            try:
+                import yaml
+            except ImportError:
+                continue
+            def walk(node):
+                if isinstance(node, dict):
+                    for key, value in node.items():
+                        if key == "script":
+                            self.assertTrue(all(isinstance(i, str) for i in value), f"{path.name}: {value}")
+                        walk(value)
+                elif isinstance(node, list):
+                    for value in node:
+                        walk(value)
+            walk(yaml.safe_load(text))
+
     def test_every_python_file_in_the_template_compiles(self):
         # The packs' self-tests run only in an installed Book, so a syntax error in one would pass here unseen.
         template = HERE / "book-template"
@@ -1823,6 +1935,22 @@ class TheRealTemplate(unittest.TestCase):
             for path in files:
                 text = path.read_text(encoding="utf-8", errors="replace")
                 self.assertEqual([n for n in foreign if re.search(book.name_pattern(n), text)], [], str(path))
+
+    def test_no_link_in_a_fresh_book_dangles_for_any_pack_combination(self):
+        # Book D102: the dotnet rules linked to the deploy pack's smoke-test doc, so a dotnet Book without that
+        # pack failed check-book's Links at its first commit.
+        root = HERE.parents[1]
+        for stack, packs in (("dotnet", ["fe-guides"]), ("dotnet", []), ("dotnet", ["bitbucket"]),
+                             ("dotnet", ["deploy"]), ("pytest", ["fe-guides"])):
+            with self.subTest(stack=stack, packs=packs), tempfile.TemporaryDirectory(prefix="book-links-") as folder:
+                target = Path(folder)
+                git(target, "init", "-q")
+                book.init(target, dict(PARAMS, stack=stack, packs=packs), MANIFEST, root, book.real_runner)
+                git(target, "add", "-A")
+                done = subprocess.run([sys.executable, str(target / "devtools/checks/check-book.py")], cwd=target,
+                                      capture_output=True, text=True, encoding="utf-8", errors="replace")
+                links = [l for l in (done.stdout + done.stderr).splitlines() if "does not exist" in l]
+                self.assertEqual(links, [])
 
     def test_init_installs_each_stack_and_pack_from_the_real_template(self):
         root = HERE.parents[1]

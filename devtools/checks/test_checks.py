@@ -819,6 +819,30 @@ class HooksWithoutPythonTests(RepoTestCase):
     def test_pre_commit_passes_when_python_runs(self):
         self.assertEqual(self.hook("pre-commit", self.python_stubs(0)).returncode, 0)
 
+    def real_book_stubs(self) -> dict[str, str]:
+        """python3/python that exit 0, except for `book.py config`, which runs for real: the hook reads `[book] declined`."""
+        env = self.python_stubs(0)
+        for name in ("python3", "python"):
+            stub = self.bin / name
+            stub.write_text('#!/bin/sh\ncase "$*" in *book.py*config*) exec "' + Path(sys.executable).as_posix()
+                            + '" "$@" ;; esac\nexit 0\n', encoding="utf-8", newline="\n")
+            stub.chmod(0o755)
+        shutil.copytree(HERE.parent / "factory", self.repo.root / "devtools/factory", dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("book-template", "__pycache__", "test_*", "hooks"))
+        shutil.copy(HERE.parent / "book.py", self.repo.root / "devtools/book.py")
+        return env
+
+    def test_pre_commit_skips_a_declined_test_setup_check_with_a_note(self):
+        # Book D95 and Book D101: the note shows when `[book] declined` names the check, never for a mere mention of it.
+        env = self.real_book_stubs()
+        self.repo.write("devtools/factory/factory.toml", '[book]\ndeclined = ["devtools/checks/check-test-setup.py"]\n')
+        done = self.hook("pre-commit", env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("check-test-setup.py is declined", done.stderr)
+        self.assertIn("check-rules.py --write", done.stderr)
+        self.repo.write("devtools/factory/factory.toml", '[book]\n# check-test-setup.py is not used here\n')
+        self.assertNotIn("is declined", self.hook("pre-commit", env).stderr)
+
     def test_commit_msg_refuses(self):
         message = self.repo.write("msg.txt", "Add the widget\n", add=False)
         done = self.hook("commit-msg", self.python_stubs(1), str(message))
@@ -1452,6 +1476,28 @@ class RulesJudgeTests(RepoTestCase):
                 + '            python3 devtools/book.py ai-files\n')
         self.assertEqual(self.judge(": `book ai-files`, CI", both)[2], [])
         self.assertEqual(self.judge(": `book ai-files`, CI", fallback)[2], ["CI does not run book ai-files"])
+
+    def test_a_script_the_project_declined_is_not_broken(self):
+        # Book D95: an enforced rule naming a declined optional check holds where the project keeps the check.
+        self.assertIn("check-test-setup.py is gone", self.judge(": `check-test-setup.py`, CI + pre-commit")[2])
+        self.repo.write("devtools/factory/book-defaults.toml", "")
+        self.repo.write("devtools/factory/factory.toml",
+                        '[book]\ndeclined = ["devtools/checks/check-test-setup.py"]\n')
+        enforcers, runs, problems = self.judge(": `check-test-setup.py`, CI + pre-commit")
+        self.assertEqual(problems, [])
+        self.assertEqual(runs, ["declined"])
+
+    def test_a_declined_core_check_is_still_gone(self):
+        # Book D100: only a pack's optional check holds when declined; a core one names a missing enforcer.
+        scripts = ("check-book.py", "check-commit-msg.py", "check-protected-paths.py", "check-private-data.py",
+                   "gen-task-rollup.py")
+        self.repo.write("devtools/factory/book-defaults.toml", "")
+        self.repo.write("devtools/factory/factory.toml",
+                        "[book]\ndeclined = [" + ", ".join(f'"devtools/checks/{name}"' for name in scripts) + "]\n")
+        os.remove(self.repo.root / "devtools/checks/check-commit-msg.py")
+        self.repo.git("rm", "-q", "--cached", "devtools/checks/check-commit-msg.py")
+        for script in scripts:
+            self.assertIn(f"{script} is gone", self.judge(f": `{script}`, CI + pre-commit")[2], script)
 
     def test_a_deleted_script_is_broken(self):
         self.assertIn("check-gone.py is gone", self.judge(": `check-gone.py`, CI")[2])

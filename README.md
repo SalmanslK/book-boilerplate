@@ -69,6 +69,16 @@ the documents init wrote from skeletons, plans, ledgers, `requirements/`.
 What a person does by hand when taking a release; the fixes themselves are in
 [`docs/defects.md`](docs/defects.md#fixed).
 
+**1.6.1** (book plugin v0.7.0, unchanged): fixes only. N7 no longer asks for a file `[book] skip_skeletons` or
+`[book] declined` leaves out. The dotnet rules and review checklists point Compose placeholders to
+`[deploy.compose_placeholders]`, name no other project's types, and no longer link to a document only another pack
+creates (a dotnet Book without the deploy or fe-guides pack failed check-book on it). A project that declines
+`check-test-setup.py` in `[book] declined` can commit again: the pre-commit hook and the local CI run print
+"declined" and go on, the Bitbucket pipeline step prints "check-test-setup.py is not in this project (declined),
+skipped." and goes on, and `check-rules.py` counts its two rules as declined; the upgrade report then asks for one
+step, `python devtools/checks/check-rules.py --write`, committed. A 1.6.0 project upgrades with
+`book upgrade --apply`; apart from that step nothing is done by hand.
+
 **1.6.0** (book plugin v0.7.0):
 
 - **Read the report first.** From 1.5 the upgrade adds a section, *The 1.6 move*: each `CLAUDE.md` loses the

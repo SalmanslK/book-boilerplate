@@ -68,11 +68,11 @@ The open questions by state and the open defects by type and source, counted fro
 
 | Defect type | Open |
 |---|---|
-| *None* | 0 |
+| tooling-ci | 1 |
 
 | Defect source | Open |
 |---|---|
-| *None* | 0 |
+| developer | 1 |
 <!-- ledgers:end -->
 
 ### Phases

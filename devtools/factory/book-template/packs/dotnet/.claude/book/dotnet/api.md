@@ -9,15 +9,15 @@ Loaded when you work under `src/Boilerplate.API/`. The root
 
 - **Endpoints dispatch through `ISender` and map the result.** No business logic, no
   repository calls, no `DbContext` — `EndpointIsolationTests` fails the build on the
-  last *(not enforced yet: add a `EndpointIsolationTests` architecture test, then mark it `[enforced: …]`)*. Endpoints are `sealed` and `internal`
-  *(not enforced yet: add a `EndpointIsolationTests` architecture test, then mark it `[enforced: …]`)*.
+  last *(enforced where the project's check exists, for example a `EndpointIsolationTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*. Endpoints are `sealed` and `internal`
+  *(enforced where the project's check exists, for example a `EndpointIsolationTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*.
 - **Authorization is default-deny.** A new endpoint is protected with no attribute;
   opting out means writing `.AllowAnonymous()` and meaning it, and listing the file on
   `anonymous-route`'s allow-list with its reason *[enforced: `check-code-rules.py`, pre-commit + CI]*.
   The permission a route needs is declared on its command or query.
 - Handlers return `Result<T>`, never `IResult`; the endpoint maps it.
 - **A create answers `CreatedAtRoute` against the resource's named GET route**, never a
-  `Location` built from a `/api/v…` literal *(not enforced yet: add a `ProductCodeRuleTests` architecture test, then mark it `[enforced: …]`)*
+  `Location` built from a `/api/v…` literal *(enforced where the project's check exists, for example a `ProductCodeRuleTests` architecture test; add one and mark the rule `[enforced: …]` if there is none)*
   Its body is `CreatedResponse` (`{ id }`), declared
   `.Produces<CreatedResponse>(201)`, unless the create returns more.
 
@@ -40,7 +40,7 @@ Loaded when you work under `src/Boilerplate.API/`. The root
    generator refuses to run until every route is placed, and fails on a sample field
    the model does not declare.
 3. **Update the module's FE integration guide** in
-   [`docs/fe-integration-guides/`](../../../docs/fe-integration-guides/) in the same
+   `docs/fe-integration-guides/` (the fe-guides pack's folder, where the project has it) in the same
    change — including its *Deviations* section if the shape differs from
    `requirements/fe-api-contracts/`. A rule that applies to every endpoint goes in
    `api-conventions.md`, never in a module guide.
@@ -61,7 +61,7 @@ Loaded when you work under `src/Boilerplate.API/`. The root
 
 - **A setting an environment must supply is three changes:** a line in the overlay's
   `environment:` block, the value in the server's `.env`, and a placeholder in
-  `QA_PLACEHOLDERS` in `devtools/checks/check-compose.py` — and, when `compose.dev.yaml` requires
-  it as well, in `DEV_PLACEHOLDERS` beside it, or the DEV render fails.
+  `[deploy.compose_placeholders]` in `devtools/factory/factory.toml` (`NAME = "ci-placeholder"`; it covers the QA and
+  the DEV render, so one line serves both), or the render fails. Never edit `check-compose.py` for it.
   "It works on DEV" is not evidence for QA: `devtools/checks/check-required-settings.sh`
   proves every `REPLACE` key reaches the container (CI runs it for QA).
