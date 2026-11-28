@@ -134,3 +134,5 @@ One line per fixed defect: id, what it was, and the commit or release that fixed
 - **D103** — nothing said a project that declines `check-test-setup.py` must rewrite the rules table. Fixed in v1.6.1.
 - **D104** — a self-test copied into every project scanned the project's own docs for names, so it failed in every real project. Fixed in v1.6.2.
 - **D105** — a link self-test built a fresh Book from the project's own `docs/plans/_template.md`, so it failed in a project whose copy differs. Fixed in v1.6.3.
+- **D106** — `book impact --block` read the retired traceability matrix, so it called a 1.6 Book's built module unbuilt. Fixed in v1.6.5.
+- **D107** — `book review-scope` with nothing changed gave the dimensions left out no reason. Fixed in v1.6.5.

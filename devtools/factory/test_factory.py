@@ -221,6 +221,52 @@ class ImpactTests(unittest.TestCase):
             with self.assertRaises(factory.FactoryError):
                 factory.traceability_blocks(Path(folder), CONFIG, "anything")
 
+    def register_book(self, root: Path) -> None:
+        """A 1.6 Book: the register in docs/requirements/, and the old matrix retired to a one-line stub."""
+        (root / "docs" / "Audit").mkdir(parents=True)
+        (root / "docs" / "Audit" / "spec-traceability.md").write_text(
+            "# Spec traceability\n\nRetired: the requirements register in docs/requirements/ is the record.\n",
+            encoding="utf-8")
+        (root / "docs" / "requirements").mkdir(parents=True)
+        header = "| Id | FSD | Requirement | Plan task | Tests | Status | Verified at | Note |\n|---|---|---|---|---|---|---|---|\n"
+        (root / "docs" / "requirements" / "companies.md").write_text(
+            "# Companies — requirements\n\n" + header
+            + "| FSD-2-R01 | §2.1 · V3 | Name required | Task 1 | CompanyTests.Create_rejects_an_empty_name | VERIFIED | a1b2c3d 2026-11-20 | — |\n"
+            + "| PLN-COMP-05 | — | Delete guard | Task 10 | CompanyDeleteTests.Delete_refuses_a_company_with_farms | VERIFIED | a1b2c3d 2026-11-20 | — |\n",
+            encoding="utf-8")
+        (root / "docs" / "requirements" / "farms.md").write_text(
+            "# Farms — requirements\n\n" + header
+            + "| FSD-4-R01 | §4.1 · V3 | Farm name required | Task 1 | — | NOT_BUILT | — | — |\n", encoding="utf-8")
+
+    def test_block_reads_the_register_where_the_book_has_one(self):
+        # Book D106: from 1.6 the register is the record; reading the retired matrix called a built module unbuilt.
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            self.register_book(root)
+            whole = factory.traceability_blocks(root, CONFIG, "companies")
+            self.assertIn("docs/requirements/companies.md", whole)
+            self.assertIn("FSD-2-R01", whole)
+            self.assertIn("PLN-COMP-05", whole)
+            self.assertNotIn("FSD-4-R01", whole)
+            row = factory.traceability_blocks(root, CONFIG, "delete guard")
+            self.assertIn("PLN-COMP-05", row)
+            self.assertNotIn("FSD-2-R01", row)
+            self.assertIn("no register row names", factory.traceability_blocks(root, CONFIG, "Customer Search"))
+
+    def test_impact_takes_requirement_ids_from_the_register_rows_whose_tests_changed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            self.register_book(root)
+            report = factory.impact(root, CONFIG, "HEAD", ["tests/App.UnitTests/Features/Companies/CompanyDeleteTests.cs"])
+        self.assertEqual(report["requirement_ids"], ["PLN-COMP-05"])
+
+    def test_review_scope_with_nothing_changed_gives_a_reason_for_each_dimension_left_out(self):
+        # Book D107: with no paths there is no triage row, and the line ended "normally N/A for ".
+        text = factory.render_review_scope({"files": ["book:peer-review/references/review-method.md"], "matched": {},
+                                            "unplaced": [], "left_out": {"B1": [], "B2": []}, "paths": []})
+        self.assertIn("  B1, B2: N/A — nothing changed against the base", text)
+        self.assertNotRegex(text, r"for\s*$")
+
     def test_impact_ci_prints_one_key_per_line(self):
         out = factory.render_ci_tier(self.ci("src/App.API/Endpoints/Geography/GeographyEndpoints.cs"))
         self.assertEqual(out.splitlines(), ["tier=modules", "filter=Category!=Smoke&Category!=S3&((FullyQualifiedName~Features.Geography))",

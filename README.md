@@ -69,6 +69,8 @@ the documents init wrote from skeletons, plans, ledgers, `requirements/`.
 What a person does by hand when taking a release; the fixes themselves are in
 [`docs/defects.md`](docs/defects.md#fixed).
 
+**1.6.5** (book plugin v0.8.0): two fixes and a rule. `book impact --block` reads the requirements register in a 1.6 Book, where it read the retired traceability matrix and called a built module unbuilt (D106), and `book impact` ties requirement ids from the register's Tests cells; `book review-scope` gives a reason when nothing changed (D107). The Book's rules say Claude never creates, edits or moves an issue in a work tracker; it suggests one. The plugin's 0.8.0 skills close a fixed defect with `/book:raise close`, plan a module's tests with `/book:fact-check before-build`, write the register, read the base branch from `base_ref`, and suggest tickets in `/book:progress`. The pin and `plugin_min` move to v0.8.0. A 1.6.4 project upgrades with `book upgrade --apply`; nothing is done by hand.
+
 **1.6.4** (book plugin v0.7.1): the plugin's `/book:publish-guides` skips `_template.md`; without it the dry run failed with "Illegal characters in path" because the template's title has `<` and `>`. The pin and `plugin_min` move to v0.7.1. A 1.6.3 project upgrades with `book upgrade --apply`; nothing is done by hand.
 
 **1.6.3** (book plugin v0.7.0, unchanged): one fix. A second self-test copied into every project built a fresh Book from the project's own plan template, so it failed in a project whose copy differs; it now runs only in the Book's own repository. A 1.6.2 project upgrades with `book upgrade --apply`; nothing is done by hand.
@@ -102,7 +104,7 @@ step, `python devtools/checks/check-rules.py --write`, committed. A 1.6.0 projec
   `CLAUDE.md`, or `[book] declined`, then take the entry out.
 - **The drift check.** `devtools/factory/book-files.lock` records the Book's files as the upgrade wrote them;
   check-book fails a commit that changes one (`[book] drift_accepted` makes it a warning, with a reason).
-- **Move the plugin pin** to `ref = "v0.7.1"` where the upgrade did not (verify N16 says so).
+- **Move the plugin pin** to `ref = "v0.8.0"` where the upgrade did not (verify N16 says so).
 - **A pack's optional document** the project does not keep: `[book] skip_skeletons = ["docs/ui-standard.md"]`,
   and neither verify nor the upgrade asks for it again.
 - **While a CONFLICT is left** `book_version` stays 1.5.x (`[book] pending_merge`, as in 1.5.1): the move is

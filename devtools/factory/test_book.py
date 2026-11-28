@@ -141,7 +141,7 @@ email-templates/
   -> designs
 """
 
-PINNED = {"book-plugins": {"source": {"source": "github", "repo": "owner/book-plugin", "ref": "v0.7.1"},
+PINNED = {"book-plugins": {"source": {"source": "github", "repo": "owner/book-plugin", "ref": "v0.8.0"},
                            "autoUpdate": False}}
 SETTINGS = {"attribution": {"commit": "", "pr": ""}, "extraKnownMarketplaces": PINNED,
             "enabledPlugins": {"book@book-plugins": True}, "hooks":{"PreToolUse": [{"matcher": MATCHER, "hooks": [
@@ -552,9 +552,9 @@ class EachCheck(BookCase):
             line = next(l for l in book.n16_skills(self.ctx()) if l.element == "the book plugin is pinned to a release")
             return line.status, line.render()
 
-        self.assertEqual(book.OK, pin_status()[0], "the fixture pins v0.7.1, this template's plugin_min")
+        self.assertEqual(book.OK, pin_status()[0], "the fixture pins v0.8.0, this template's plugin_min")
         source = {"source": "github", "repo": "owner/book-plugin"}
-        for ref, status in (("v9.0.0", book.OK), ("v0.3.0", book.WRONG), ("v0.4.0", book.WRONG), ("v0.5.0", book.WRONG), ("v0.5.1", book.WRONG), ("v0.6.0", book.WRONG), ("v0.6.1", book.WRONG), ("v0.7.0", book.WRONG),
+        for ref, status in (("v9.0.0", book.OK), ("v0.3.0", book.WRONG), ("v0.4.0", book.WRONG), ("v0.5.0", book.WRONG), ("v0.5.1", book.WRONG), ("v0.6.0", book.WRONG), ("v0.6.1", book.WRONG), ("v0.7.0", book.WRONG), ("v0.7.1", book.WRONG), ("v0.7.2", book.WRONG),
                             (None, book.WRONG),
                             ("main", book.WRONG),
                             ("e1e60175b0fbacdcc28342946e20b41461fe7d7a", book.CONFIRM),

@@ -100,7 +100,7 @@ reason = "was trialled and removed from this repository : it answered one of fou
 # ---------------------------------------------------------------- requirements
 #
 # A requirement id is `<id_prefix>-<section>-R<n>` (FSD-2.13.9-R04); `book impact` finds the ids
-# the traceability matrix ties to the changed files.
+# the requirements register (or, before Book 1.6, the traceability matrix) ties to the changed files.
 
 [requirements]
 id_prefix = "FSD"

@@ -733,7 +733,16 @@ def impact(root: Path, config: Config, base: str, paths: list[str] | None = None
             cross_cutting.append(path)
     requirement_ids: set[str] = set()
     traceability = root / config.raw.get("requirements", {}).get("traceability", "")
-    if traceability.is_file():
+    register = register_files(root)
+    if register:
+        # The register names each requirement's tests, not its code: a changed test file ties its rows.
+        names = {Path(path).stem for path in paths if Path(path).suffix.lower() not in NOT_CODE}
+        for _, _, header, rows in register_tables(register):
+            for line in rows:
+                row = dict(zip(header, book_config.table_cells(line)))
+                if any(re.search(rf"\b{re.escape(name)}\b", row.get("Tests", "")) for name in names):
+                    requirement_ids.add(row["Id"].strip("*` "))
+    elif traceability.is_file():
         names = {path.rsplit("/", 1)[-1] for path in paths if path.startswith(source_roots)}
         for line in traceability.read_text(encoding="utf-8", errors="replace").splitlines():
             if any(name in line for name in names):
@@ -757,7 +766,7 @@ def render_impact(report: dict) -> str:
         lines.append("\n**Cross-cutting** — no module owns these, so the whole integration suite runs:")
         lines += [f"- `{p}`" for p in report["cross_cutting"][:15]]
     if report["requirement_ids"]:
-        lines.append("\n**Requirement ids** the traceability matrix ties to these files: "
+        lines.append("\n**Requirement ids** the requirements record ties to these files: "
                      + ", ".join(report["requirement_ids"]))
     if report["regenerate"]:
         lines.append("\n**Regenerate**")
@@ -1621,7 +1630,9 @@ def render_review_scope(report: dict) -> str:
         grouped: dict[tuple, list[str]] = {}
         for d, rows in report["left_out"].items():
             grouped.setdefault(tuple(rows), []).append(d)
-        lines += [f"  {', '.join(ds)}: normally N/A for {'; '.join(rows)}" for rows, ds in grouped.items()]
+        lines += [f"  {', '.join(ds)}: " + (f"normally N/A for {'; '.join(rows)}" if rows
+                                            else "N/A — nothing changed against the base")
+              for rows, ds in grouped.items()]
     return "\n".join(lines)
 
 
@@ -1640,6 +1651,57 @@ def command_review_scope(root: Path, config: Config, args: argparse.Namespace) -
     return render_review_scope(review_scope(config, paths))
 
 
+REGISTER = "docs/requirements"  # the requirements register, from Book 1.6 (.claude/book/docs.md, Requirements register)
+NOT_CODE = (".md", ".txt", ".toml", ".json", ".yml", ".yaml", ".csv", ".pdf")
+
+
+def register_files(root: Path) -> list[Path]:
+    """The register's module files, as check-book reads them; none in a Book before 1.6."""
+    folder = root / REGISTER
+    return sorted(p for p in folder.glob("*.md") if not p.name.startswith("_")) if folder.is_dir() else []
+
+
+def register_tables(files: list[Path]):
+    """(file, its `# ` title, a table's header cells, that table's row lines) for each table in each file."""
+    for path in files:
+        title, header, rows = "", None, []
+        for line in path.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n").split("\n"):
+            if line.startswith("# ") and not title:
+                title = line
+            if not line.lstrip().startswith("|"):
+                if header:
+                    yield path, title, header, rows
+                header, rows = None, []
+                continue
+            if header is None:
+                header = book_config.table_cells(line)
+            elif not set(line.replace("|", "").strip()) <= set("-: "):
+                rows.append(line)
+        if header:
+            yield path, title, header, rows
+
+
+def register_rows(root: Path, files: list[Path], needle: str) -> str:
+    """The register's answer to --block: a module whose file or title names the text, whole; else matching rows."""
+    wanted = needle.casefold()
+    whole, matching = [], []
+    for path, title, header, rows in register_tables(files):
+        rel = path.relative_to(root).as_posix()
+        head = "| " + " | ".join(header) + " |"
+        if wanted in path.stem.replace("-", " ").casefold() or wanted in title.casefold():
+            whole.append(f"{rel}\n{title}\n{head}\n" + "\n".join(rows))
+        else:
+            hits = [line for line in rows if wanted in line.casefold()]
+            if hits:
+                matching.append(f"{rel}\n{title}\n{head}\n" + "\n".join(hits))
+    if whole:
+        return f"{REGISTER}/: {len(whole)} module(s) whose file or title names {needle!r}\n\n" + "\n\n".join(whole)
+    if matching:
+        return f"{REGISTER}/: {needle!r} in {len(matching)} table(s), matching rows only\n\n" + "\n\n".join(matching)
+    return (f"{REGISTER}/: no register row names {needle!r}. A section with no rows is unbuilt — name the plan "
+            "that would own it from docs/project.md.")
+
+
 def traceability_blocks(root: Path, config: Config, needle: str) -> str:
     """
     The part of the traceability matrix one question needs, so /book:impact reads that and not the
@@ -1648,6 +1710,10 @@ def traceability_blocks(root: Path, config: Config, needle: str) -> str:
     block whose body holds it returns its heading and only those lines (a code path, a requirement id).
     Case is ignored. No match says so: a section with no rows is unbuilt, which is a finding, not an error.
     """
+    files = register_files(root)
+    if files:
+        # From Book 1.6 the register is the record and the matrix a retired stub (Book D106).
+        return register_rows(root, files, needle)
     rel = (config.raw.get("requirements") or {}).get("traceability", "")
     path = root / rel
     if not rel or not path.is_file():
@@ -2021,8 +2087,9 @@ def parser(prog: str = "book") -> argparse.ArgumentParser:
     impact_parser = sub.add_parser("impact", help="what the change reaches")
     impact_parser.add_argument("paths", nargs="*")
     impact_parser.add_argument("--ci", action="store_true", help="the local CI tier and integration filter (ci-local.sh)")
-    impact_parser.add_argument("--block", default="", help="only the traceability matrix's blocks for this text: an FSD "
-                               "section, page or plan in a heading, else a code path or requirement id in a row")
+    impact_parser.add_argument("--block", default="", help="only the requirements register's rows for this text: a module "
+                               "whose file or title names it, else the rows that do (before Book 1.6, the traceability "
+                               "matrix's blocks)")
     if deploy is not None:
         deploy.add_parser(sub)
     book.add_parser(sub, prog)

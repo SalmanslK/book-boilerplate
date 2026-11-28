@@ -174,6 +174,8 @@ Where the project tracks its work in Jira (`[jira]` in `devtools/factory/factory
   blank. A bug gets the short form: cause, fix, the FSD section it agrees with, how it was verified, notes.
 - **Read an issue with `book jira <key>`**, which can only read. **Link, don't copy.** **Never put credentials,
   tokens, test passwords or customer data in Jira.** Claude drafts on request and posts only after approval.
+- **Claude never creates, edits or moves an issue** — in Jira or any other work tracker. It suggests one
+  (`/book:progress` lists the tasks with no issue), and the person creates it and gives the key back.
 
 ## Skills
 
