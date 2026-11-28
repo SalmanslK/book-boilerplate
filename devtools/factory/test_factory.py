@@ -1598,6 +1598,8 @@ class SyncPlanTests(unittest.TestCase):
         cls.write(cls, "docs/plans/stores.md", "# Stores, after the sync\n")
         cls.write(cls, "src/App.cs", "class App { int x; }\n")
         cls.write(cls, "README.md", "# Readme\n")
+        (cls.root / "docs/archive").mkdir(parents=True, exist_ok=True)
+        cls.write(cls, "docs/archive/defects-closed.md", "# Closed defects\n")
         cls.dev = cls.commit(cls, "Work since the sync")
         git(cls.root, "update-ref", "refs/remotes/origin/dev", "HEAD")
 
@@ -1663,6 +1665,7 @@ class SyncPlanTests(unittest.TestCase):
         for path in ("docs/plans/stores.md", "docs/project.md", "README.md"):
             self.assertIn(path, delta)
         self.assertNotIn("src/App.cs", delta, "the delta set is docs, CLAUDE.md and README.md only")
+        self.assertNotIn("docs/archive/defects-closed.md", delta, "the archive is history, not a living doc the sync reads")
         self.assertIn("plus every doc that cites a section", out)
         self.assertEqual(before, git(self.root, "status", "--porcelain", "--ignored"), "read-only: nothing written")
 
@@ -1673,7 +1676,7 @@ class SyncPlanTests(unittest.TestCase):
         self.assertIn("QA — live read of", out)
         self.assertIn(f"→ baseline: {self.qa[:12]} (live read)", out)
         self.assertIn(f"DEV minus QA's deployed commit ({self.qa[:12]}..{self.dev[:12]}): 3 commit(s)", out)
-        self.assertIn("by area: README.md 1, docs 1, docs/plans 1, src 1", out)
+        self.assertIn("by area: README.md 1, docs 1, docs/archive 1, docs/plans 1, src 1", out)
         self.assertIn(f"task-evidence.py --since {self.qa[:12]}", out)
         self.assertIn("DEV minus the qa branch, for reference only", out)
         self.assertEqual(len(self.ssh), 1, "one read of QA, never DEV")

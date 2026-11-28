@@ -69,6 +69,8 @@ the documents init wrote from skeletons, plans, ledgers, `requirements/`.
 What a person does by hand when taking a release; the fixes themselves are in
 [`docs/defects.md`](docs/defects.md#fixed).
 
+**1.6.6** (book plugin v0.8.0, unchanged): one fix. `book sync-plan` left `docs/archive/` in its delta set, so a closed defect or an answered question made the sync re-read history; it now leaves the archive out and says so. A 1.6.5 project upgrades with `book upgrade --apply`; nothing is done by hand.
+
 **1.6.5** (book plugin v0.8.0): two fixes and a rule. `book impact --block` reads the requirements register in a 1.6 Book, where it read the retired traceability matrix and called a built module unbuilt (D106), and `book impact` ties requirement ids from the register's Tests cells; `book review-scope` gives a reason when nothing changed (D107). The Book's rules say Claude never creates, edits or moves an issue in a work tracker; it suggests one. The plugin's 0.8.0 skills close a fixed defect with `/book:raise close`, plan a module's tests with `/book:fact-check before-build`, write the register, read the base branch from `base_ref`, and suggest tickets in `/book:progress`. The pin and `plugin_min` move to v0.8.0. A 1.6.4 project upgrades with `book upgrade --apply`; nothing is done by hand.
 
 **1.6.4** (book plugin v0.7.1): the plugin's `/book:publish-guides` skips `_template.md`; without it the dry run failed with "Illegal characters in path" because the template's title has `<` and `>`. The pin and `plugin_min` move to v0.7.1. A 1.6.3 project upgrades with `book upgrade --apply`; nothing is done by hand.

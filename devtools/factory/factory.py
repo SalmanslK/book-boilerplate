@@ -1886,6 +1886,8 @@ SYNC_RECORD = "docs/project.md"
 # The line's shape: `<date> · dev <sha> (FSD V<n>, matrix V<n>) · <mode> — <notes>` - the revisions in
 # brackets are optional, and the mode is what the pass wrote ("delta", "full", "phases 1 and 5 only").
 SYNC_DOCS = ("docs", "CLAUDE.md", "README.md")
+# docs/archive/ is history (closed defects, answered questions), not a living doc the sync reads.
+SYNC_SKIP = (":(exclude)docs/archive",)
 LAST_SYNC = re.compile(r"^\*\*Last requirements sync:\*\*\s*(\d{4}-\d{2}-\d{2})\s*·\s*dev\s*`?([0-9a-f]{7,40})`?"
                        r"(?:\s*\([^)\n]*\))?\s*·\s*([^·—:,\n]*[^·—:,\s])", re.M)
 SYNC_MODES = ("delta", "full", "verify-only")
@@ -1989,9 +1991,9 @@ def command_sync_plan(root: Path, config: Config, args: argparse.Namespace) -> s
               "The skill says the mode in one line."]
     delta: list[str] = []
     if on_dev:
-        delta = [line for line in git_strict(root, "diff", "--name-only", f"{synced}..{dev}", "--", *SYNC_DOCS)
+        delta = [line for line in git_strict(root, "diff", "--name-only", f"{synced}..{dev}", "--", *SYNC_DOCS, *SYNC_SKIP)
                  .splitlines() if line]
-        lines.append(f"Delta set: {len(delta)} file(s) under {', '.join(SYNC_DOCS)} changed since {synced[:12]}"
+        lines.append(f"Delta set: {len(delta)} file(s) under {', '.join(SYNC_DOCS)} changed since {synced[:12]} (docs/archive/ left out)"
                      + ("" if mode == "delta" else f" — for reference; {mode} mode reads " +
                         ("every living doc" if mode == "full" else "none")) + ":")
         lines += listed(delta)
