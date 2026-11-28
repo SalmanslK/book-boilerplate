@@ -742,8 +742,11 @@ def n15_factory_config(ctx: Context) -> list[Line]:
             problems.append(f"[deploy.notes] {', '.join(unknown)}: no /book:deploy step has that name "
                             f"({', '.join(deploy_tool.NOTE_STEPS)}), so the note is never read")
     trace = (ctx.config.get("requirements") or {}).get("traceability")
-    if trace and not (ctx.root / trace).is_file():
-        fill.append(f"{trace} (written by /book:fact-check)")
+    # Book D108: the register (one file per module) is the record from 1.6; an older Book's matrix still counts.
+    register = ctx.root / "docs" / "requirements"
+    recorded = register.is_dir() and any(register.glob("*.md"))
+    if trace and not recorded and not (ctx.root / trace).is_file():
+        fill.append(f"docs/requirements/<module>.md, or {trace} in a Book before 1.6 (written by /book:fact-check)")
     book_table = ctx.config.get("book") or {}
     unmerged = book_table.get(PENDING_MERGE) or []
     if unmerged:

@@ -1105,6 +1105,27 @@ class ProtectedPathsTests(RepoTestCase):
         self.assertEqual(code, 1)
         self.assertIn("could not check", out)
 
+    def test_a_new_repository_with_no_remote_has_nothing_to_compare_yet(self):
+        # Book D109: a greenfield Book's first commits, before it has a remote, hold nothing a base could protect.
+        repo = Repo()
+        self.addCleanup(repo.close)
+        repo.write(protected_paths.FACTORY_TOML, GUARD_TOML)
+        repo.git("add", "-A")
+        code, out = run_main(protected_paths.main, ["--staged", "--base", "origin/dev"], root=repo.root, env={})
+        self.assertEqual(code, 0, "the first commit, with no commit and no remote yet")
+        self.assertIn("no origin remote yet", out)
+        repo.commit("Start")
+        code, out = run_main(protected_paths.main, ["--staged", "--base", "origin/dev"], root=repo.root, env={})
+        self.assertEqual(code, 0, "a later commit, still before the first push")
+        code, out = run_main(protected_paths.main, [], root=repo.root, env={"BITBUCKET_PR_DESTINATION_BRANCH": "dev"})
+        self.assertEqual(code, 1, "CI always has a base to compare: not checking there is not passing")
+
+    def test_a_remote_whose_base_is_not_fetched_still_fails_closed(self):
+        self.repo.git("remote", "add", "origin", "https://example.invalid/project.git")
+        code, out = self.check(base="origin/dev")
+        self.assertEqual(code, 1, "a remote exists, so its base can be fetched: not checking is not passing")
+        self.assertIn("could not check", out)
+
     def test_a_failed_diff_fails_closed(self):
         real = protected_paths.git
 

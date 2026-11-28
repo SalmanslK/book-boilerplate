@@ -136,3 +136,5 @@ One line per fixed defect: id, what it was, and the commit or release that fixed
 - **D105** — a link self-test built a fresh Book from the project's own `docs/plans/_template.md`, so it failed in a project whose copy differs. Fixed in v1.6.3.
 - **D106** — `book impact --block` read the retired traceability matrix, so it called a 1.6 Book's built module unbuilt. Fixed in v1.6.5.
 - **D107** — `book review-scope` with nothing changed gave the dimensions left out no reason. Fixed in v1.6.5.
+- **D108** — `book verify` asked a 1.6 Book for the retired traceability matrix, so a new Book was never READY. Fixed in v1.6.7.
+- **D109** — a new repository could not make its first commit: the protected-paths check needed `origin/dev` before any push. Fixed in v1.6.7.

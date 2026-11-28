@@ -51,7 +51,9 @@ touched the path is a merge that kept one parent's existing copy.
 The base is the pull request's destination in CI (`BITBUCKET_PR_DESTINATION_BRANCH`), else
 `origin/dev`. Exits 0 when nothing protected changed, 1 naming each offending path and its rule —
 never a file's contents. "Could not check" — an unknown ref, no merge base (a shallow clone), no
-readable rules, a git command that failed — always exits 1: an empty answer is not "nothing changed".
+readable rules, a git command that failed — always exits 1: an empty answer is not "nothing changed". The
+one exception, outside CI, is a new repository whose base names a remote it does not have yet (`origin/dev`
+before the first push): no base exists to protect, so it passes and says so.
 
 Python 3.11+, standard library only.
 """
@@ -323,6 +325,12 @@ def main(argv: list[str] | None = None, root: Path = ROOT, env: dict[str, str] |
     try:
         base = option(args, "--base", f"origin/{destination}" if destination else REVIEWED)
         head = option(args, "--head", "HEAD")
+        remote = base.split("/", 1)[0] if "/" in base else ""
+        if remote and not destination and remote not in must(git("remote", root=root), "remote").split():
+            # Book D109: before a new repository's first push there is no base, so nothing it holds to protect.
+            print(f"{NAME}: nothing to compare — no {remote} remote yet, so {base} cannot exist; "
+                  "this check runs from the first commit after the push")
+            return 0
         base_commit, head_commit = commit_of(base, root), commit_of(head, root)
         merge_base = git("merge-base", base_commit, head_commit, root=root)
         if merge_base.returncode != 0 or not merge_base.stdout.strip():

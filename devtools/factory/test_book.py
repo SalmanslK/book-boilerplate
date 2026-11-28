@@ -518,6 +518,17 @@ class EachCheck(BookCase):
         self.write("devtools/factory/factory.toml", FACTORY_TOML.replace('ask = ["CLAUDE.md", ".claude/**"]', 'ask = []'))
         self.assertFails(book.n15_factory_config)
 
+    def test_n15_takes_the_requirements_register_in_place_of_the_matrix(self):
+        # Book D108: a 1.6 Book keeps its requirements in docs/requirements/, and /book:fact-check no longer
+        # writes the matrix there, so the register alone is the record.
+        os.remove(self.root / "docs/Audit/spec-traceability.md")
+        lines = book.n15_factory_config(self.ctx())
+        text = " ".join(l.render() for l in lines)
+        self.assertIn(book.TO_FILL, [l.status for l in lines], "no record of the requirements at all")
+        self.assertIn("docs/requirements/<module>.md", text, "the register is what /book:fact-check writes now")
+        self.write("docs/requirements/things.md", "# Things — requirements register\n")
+        self.assertPasses(book.n15_factory_config)
+
     def test_n15_names_a_deploy_note_no_step_reads(self):
         self.write("devtools/factory/factory.toml", FACTORY_TOML + '\n[deploy.notes]\ncheck = "x"\nup = "y"\n')
         self.assertPasses(book.n15_factory_config)
